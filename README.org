@@ -1,0 +1,21 @@
+#+TITLE: ABAP In Emacs (AiE)
+
+
+* Working Log
+** DONE Project Management
+   CLOSED: [2018-03-16 Fri 19:04]
+   - Setup Project
+   - Switch Between Project
+   - Project Bind with Server
+** DONE Authentication
+   CLOSED: [2018-03-20 Tue 19:05]
+   - User Logon
+** TODO Retrieve Source Object
+*** DONE Search From Server
+    CLOSED: [2018-03-26 Mon 19:07]
+*** DONE Retrieve Source For Object Type - Program (PROG)
+    CLOSED: [2018-03-26 Mon 19:08]
+*** TODO Retrieve Source For Object Type - Class (CLAS)
+*** TODO Retrieve Source For Object Type - CDS (DDLS/DCLS)
+** TODO Post Syntax Check to Server 
+*** TODO Pass CSRF Token Validation 
