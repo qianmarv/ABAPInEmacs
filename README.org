@@ -2,6 +2,55 @@
 
 
 * Working Log
+** Draft / Rough Idea
+*** Project Management
+**** Workspace
+     Two ways of manage project
+     - Central - workspace: All projects hard/soft stored/connected with workspace
+       * Project <> Server!
+       * Customizing Variable
+       * Default directory while setup project
+       * A project directory (projects.xml)!
+     - Distributed: projects directoy can be put anywhere.
+*** Source Management
+    ;; 0. Query List
+    ;; 1. Pull 
+    ;; 2. Check Syntax
+    ;; 3. Save to Server
+    ;; 3.1 Lock
+    ;; 4. Activate At Server
+
+    ;; Supported Object Type
+    ;;;; DCLS => Access Control
+    ;;;; DDLS => Data Definition
+
+    ;; ------------------------------------------Process----------------------------------------
+
+    ;; Query Object List From Server
+    ;;;; GET /sap/bc/adt/repository/informationsystem/objecttypes?maxItemCount=999&name=*&data=usedByProvider
+    ;;;; GET /sap/bc/adt/repository/informationsystem/search?operation=quickSearch&query=I_CNSLDTNINTCORECNCL%2A&maxResults=51
+
+    ;; Start to Edit: Send Lock Post
+    ;;;; POST /sap/bc/adt/programs/programs/zmq_abap_test01?_action=LOCK&accessMode=MODIFY
+    ;;;; Get LOCK_HANDLE
+
+    ;; Check Syntax In Server
+    ;;;; POST /sap/bc/adt/checkruns?reporters=abapCheckRun
+    ;;;; Before Submit to Server, Need base64 encode source and wrap into posting xml
+    ;;;; After Saved to Server, 
+    ;;;; 1. Active Version
+    ;;;; 2. Unsaved Version
+    ;;;; 3. Saved in server version
+
+    ;; Save Source In Server
+    ;;;; PUT /sap/bc/adt/programs/programs/zmq_abap_test01/source/main?lockHandle=tdOnBGpU37goVbesZZSK6aK%2FG%2FA%3D HTTP/1.1
+
+    ;; Activate Source
+    ;; 1) Unlock
+    ;;;; POST /sap/bc/adt/programs/programs/zmq_abap_test01?_action=UNLOCK&lockHandle=tdOnBGpU37goVbesZZSK6aK%2FG%2FA%3D HTTP/1.1
+    ;; 2) Activate
+    ;;;; POST /sap/bc/adt/activation?method=activate&preauditRequested=true HTTP/1.1
+
 ** DONE Project Management
    CLOSED: [2018-03-16 Fri 19:04]
    - Setup Project
@@ -18,4 +67,8 @@
 *** TODO Retrieve Source For Object Type - Class (CLAS)
 *** TODO Retrieve Source For Object Type - CDS (DDLS/DCLS)
 ** TODO Post Syntax Check to Server 
-*** TODO Pass CSRF Token Validation 
+*** DONE Pass CSRF Token Validation 
+    CLOSED: [2018-03-28 Wed 18:17]
+    With ~buffer-string~ somehow, it didn't work!
+    Nothing related with ~buffer-string~, but the content size.
+    How to solve => Change to https!
