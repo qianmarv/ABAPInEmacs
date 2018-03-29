@@ -60,6 +60,7 @@
 
 ;; (defvar abaplib-system-ID nil
 ;;   "ABAP system client used for login.")
+;; TODO combine below project/server related variables into a prop variable
 (defvar abaplib--service-url nil
   "The address of the abap server host")
 
@@ -76,10 +77,12 @@
   "Local Variable: ABAP Object Properties")
 
 
+(defconst abaplib--log-buffer "*ABAP Log*"
+  "ABAP log buffer")
 ;;==============================================================================
 ;; Utilities
 ;;==============================================================================
-(defun abaplib-util-current-directory ()
+(defun abaplib-util-current-dir ()
   (file-name-directory buffer-file-name))
 
 (defun abaplib-util-get-string-from-file (filePath)
@@ -95,11 +98,38 @@
       (replace-match ""))
     (buffer-string))
   )
+
+(defun abaplib-util-goto-position (line column)
+  (goto-char (point-min))
+  (forward-line (- line 1))
+  (move-to-column column))
+
 (defun abaplib-util-xml-parser()
   (libxml-parse-xml-region (point-min) (point-max)))
 
+;; (defun abaplib-util-log-buf-init ()
+;;   (save-current-buffer
+;;     (set-buffer (get-buffer-create abaplib--log-buffer))
+;;     (setq buffer-read-only t)
+;;     ))
 
+(defun abaplib-util-log-buf-write(log)
+  (save-current-buffer
+    (set-buffer (get-buffer-create abaplib--log-buffer))
+    (setq buffer-read-only nil)
+    (goto-char (point-max))
+    (insert "\n\n")
+    (insert (concat "Log at: "
+             (format-time-string "%Y-%m-%dT%T")
+             ((lambda (x) (concat (substring x 0 3) ":" (substring x 3 5)))
+              (format-time-string "%z"))))
+    ;; (insert "\n")
+    (insert (format "%s" log))
+    (setq buffer-read-only t)
+    ))
 
+(defun abaplib-util-log-buf-pop()
+  (pop-to-buffer (get-buffer-create abaplib--log-buffer)))
 ;;==============================================================================
 ;; Project
 ;;==============================================================================
@@ -160,6 +190,9 @@
     ;; (setq abaplib--token nil)
     (let* ((abap-config-dir (expand-file-name (format "%s/.abap" project_name) abap-workspace-dir))
            (abap-config-file (expand-file-name "server.ini" abap-config-dir)))
+      ;; Create buffer
+      ;; (abaplib-util-log-buf-init)
+
       ;; Read server information
       (with-temp-buffer
         (insert-file-contents abap-config-file)
@@ -190,7 +223,7 @@
   )
 (defun abaplib-project-ensure-inside-project()
   "Ensure in a project"
-  (let* ((proj_dir (abaplib-util-current-directory))
+  (let* ((proj_dir (abaplib-util-current-dir))
          (folders (split-string proj_dir "/" t))
          (proj_name (car (last folders)))
          (val_dir (expand-file-name (concat abap-workspace-dir "/" proj_name "/"))))
@@ -260,7 +293,8 @@
                     :sync (not success)
                     :headers headers
                     :status-code '((304 . (lambda (&rest _) (message "Source Not Modified")))
-                                   (401 . (lambda (&rest _) (error "Not Authorized"))))
+                                   (401 . (lambda (&rest _) (error "Not Authorized")))
+                                   (403 . (lambda (&rest _) (error "Session Expired, Try Refresh Session."))))
                     ;; :params `((sap-client . ,abaplib--auth-client))
                     :success success
                     :error  (lambda (&key error-thrown &allow-other-keys &rest _)
@@ -293,45 +327,58 @@
 (defun abaplib-auth-get-csrf-token (projectp)
   (alist-get 'csrf-token (alist-get projectp abaplib--auth-data)))
 
+(defun abaplib-auth-refresh-session ()
+  (interactive)
+  (let* ((projectp (intern abaplib--project-name))
+         (login_token (car (abaplib-auth-get-login-token projectp))))
+    (if login_token
+        (abaplib-auth-login-with-token login_token)
+      (abaplib-auth-login))))
+
 (defun abaplib-auth-login ()
-  "Login into ABAP Server as user USERNAME with PASSWORD and CLIENT"
-  (interactive
-   (let ((username (upcase (read-string "Username: ")))
+  (interactive)
+  (let* ((username (upcase (read-string "Username: ")))
          (password (read-passwd "Password: "))
          (client   (read-string "Client: "  ))
-         (projectp (intern abaplib--project-name)))
+         (login_token (cons "Authorization"
+                            (format "Basic %s"
+                                    (base64-encode-string (concat username ":" password)))))
+         )
+    (abaplib-auth-login-with-token login_token client)))
 
-     (let* ((login_token (cons "Authorization"
-                               (format "Basic %s"
-                                       (base64-encode-string (concat username ":" password)))))
-            (login_uri "/sap/bc/adt/core/discovery")
-            (response (request
-                       (concat  abaplib--service-url
-                                (replace-regexp-in-string "^/*" "" login_uri))
-                       :sync t
-                       :headers (list login_token (cons "X-CSRF-Token" "Fetch"))
-                       :params (list (cons "sap-client" client))
-                       ))
-            (login_status (request-response-symbol-status response))
-            (csrf_token (cons "x-csrf-token" (request-response-header response "x-csrf-token"))))
+(defun abaplib-auth-login-with-token (login_token &optional client)
+  "Login into ABAP Server as user USERNAME with PASSWORD and CLIENT"
+  (message "Connecting...")
+  (let* ((projectp (intern abaplib--project-name))
+         (client (or client abaplib--auth-client))
+         (login_uri "/sap/bc/adt/core/discovery")
+         (response (request
+                    (concat  abaplib--service-url
+                             (replace-regexp-in-string "^/*" "" login_uri))
+                    :sync t
+                    :headers (list login_token (cons "X-CSRF-Token" "Fetch"))
+                    :params (list (cons "sap-client" client))
+                    ))
+         (login_status (request-response-symbol-status response))
+         (csrf_token (cons "x-csrf-token" (request-response-header response "x-csrf-token"))))
 
-       (if (not (eq login_status 'success))
-           (error "Login Failed!")
-         "Init project auth data"
-         (if (alist-get projectp abaplib--auth-data)
-             ;; Remove previous login data
-             (setcdr (assq projectp abaplib--auth-data)
-                     (cons projectp t))
-           (add-to-list 'abaplib--auth-data (cons projectp t))
-           )
+    (if (not (eq login_status 'success))
+        (error "Connect to server Failed!")
+      "Init project auth data"
+      (if (alist-get projectp abaplib--auth-data)
+          ;; Remove previous login data
+          (setcdr (assq projectp abaplib--auth-data)
+                  (cons projectp t))
+        (add-to-list 'abaplib--auth-data (cons projectp t))
+        )
 
-         (abaplib-auth-set-login-token projectp login_token)
-         (abaplib-auth-set-csrf-token projectp csrf_token)
+      (abaplib-auth-set-login-token projectp login_token)
+      (abaplib-auth-set-csrf-token projectp csrf_token)
 
-         (setq abaplib--auth-client client)
-         (message "Login successfully!"))
-       nil
-       ))))
+      (setq abaplib--auth-client client)
+      (message "Connected to server!"))
+    nil
+    ))
 
 (defun abaplib-auth-ensure-login ()
   "Ensure logged In"
@@ -357,11 +404,12 @@
 
 (defun abaplib-srv-search--compose-sel-list (object-list)
   (mapcar (lambda (obj)
-            (let* ((attrs       (xml-node-attributes obj))
-                   (type        (cdr (assq 'type        attrs)))
-                   (name        (cdr (assq 'name        attrs)))
-                   (packageName (cdr (assq 'packageName attrs)))
-                   (description (cdr (assq 'description attrs)))
+            (let* (
+                   ;; (attrs       (xml-node-attributes obj))
+                   (type        (xml-get-attribute obj 'type))
+                   (name        (xml-get-attribute obj 'name))
+                   ;; (packageName (xml-get-attribute obj 'packageName))
+                   (description (xml-get-attribute obj 'description))
                    )
               (list (format "%-8s%-31s%s" type name description))))
           object-list))
@@ -464,48 +512,6 @@
 ;;==============================================================================
 ;; Service - Syntax Check
 ;;==============================================================================
-(defun abaplib-srv-check-syntax ()
-  " Check syntax for source code in current buffer"
-  ;;FIXME Seems that if the posted content size over certain number will require additional authentication!!
-  (interactive)
-  (let ((object_name (abaplib-object-name))
-        (object_type (abaplib-object-get-type))
-        (object_version (abaplib-object-get-version))
-        (object_source (buffer-substring-no-properties (point-min) (point-max))))
-    (cond ((string= object_type "PROG/P") (abaplib-srv-check-prog
-                                           object_name
-                                           object_source
-                                           object_version
-                                           ))
-          (t nil))
-    )
-  )
-
-(defun abaplib-srv-check-prog (prog_name source &optional version )
-  "Check ABAP program syntax based on local unsubmitted source"
-  (let* ((version (or version "active"))
-         (adtcore_uri (concat "/sap/bc/adt/programs/programs/" prog_name))
-         (chkrun_uri  (concat adtcore_uri "/source/main"))
-         (chkrun_content (base64-encode-string source))
-         (post_data (abaplib-srv-check-syntax-template
-                     adtcore_uri
-                     chkrun_uri version chkrun_content)))
-    ;; before post
-    ;; (message post_data)
-    (abaplib-service-call
-     (abaplib-service-get-uri 'checkrun)
-     (lambda (&rest data)
-       (let* ((check_report (car (xml-get-children (cl-getf data :data) 'checkReport)))
-              (message_list (xml-get-children check_report 'checkMessage))
-              (file (format "%s/%s.check.el" abaplib--project-dir prog_name)))
-         (write-region (format "%S" check_report) nil file)
-         ))
-     :parser 'abaplib-util-xml-parser
-     :type "POST"
-     :data post_data
-     :headers (list (cons "Content-Type" "application/vnd.sap.adt.checkobjects+xml"))
-     )
-    ))
 
 (defun abaplib-srv-check-syntax-template (adtcore_uri chkrun_uri version &optional chkrun_content)
   "Return xml of checkObjects"
@@ -530,6 +536,112 @@
    "</chkrun:checkObjectList>"
    ))
 
+
+(defun abaplib-srv-check-syntax ()
+  " Check syntax for source code in current buffer"
+  (interactive)
+  (message "Syntax check...")
+  (let ((object_name (abaplib-object-name))
+        (object_type (abaplib-object-get-type))
+        (object_version (abaplib-object-get-version))
+        (object_source (buffer-substring-no-properties (point-min) (point-max))))
+    (cond ((string= object_type "PROG/P") (abaplib-srv-check-prog
+                                           object_name
+                                           object_source
+                                           object_version
+                                           ))
+          (t nil))
+    )
+  )
+
+
+(defun abaplib-srv-check-render-type-text(type)
+  (cond ((string= type "E") (propertize "Error"       'face '(bold (:foreground "red"))))
+        ((string= type "W") (propertize "Warning"     'face '(bold (:foreground "orange"))))
+        ((string= type "I") (propertize "Information" 'face '(bold (:foreground "green"))))
+        (t "Other"))
+  )
+
+(defun abaplib-srv-check-render-pos(position &optional target_buffer)
+  (let* ((target_buffer (or target_buffer (current-buffer)))
+         (pos_list (split-string position ","))
+         (line (string-to-number (car pos_list)))
+         (column (string-to-number (car (cdr pos_list))))
+         (map (make-sparse-keymap))
+         (fn_follow_pos `(lambda ()
+                           (interactive)
+                           (pop-to-buffer ,target_buffer)
+                           (abaplib-util-goto-position ,line ,column))
+                        ))
+    (define-key map (kbd "<down-mouse-1>") fn_follow_pos)
+    (define-key map (kbd "<RET>") fn_follow_pos)
+    (propertize position
+                'face 'underline
+                'mouse-face 'highlight
+                'keymap map)))
+
+(defun abaplib-srv-check-show-message (messages)
+  (let ((severity_level "I")
+        (output_log))
+    (dolist (message messages severity_level output_log)
+      (let* ((uri (xml-get-attribute message 'uri))
+             (type (xml-get-attribute message 'type))
+             (text (xml-get-attribute message 'shortText))
+             (position (progn
+                         (string-match "#start=\\([0-9]+,[0-9]+\\)" uri)
+                         (match-string 1 uri))))
+
+        (if (or (and (string= type "W") (string= severity_level "I"))
+                (and (string= type "E") (or (string= severity_level "W")
+                                            (string= severity_level "I"))))
+            (setq severity_level type))
+
+        (setq output_log
+              (concat output_log "\n"
+                      (concat (format "[%s] " (abaplib-srv-check-render-type-text type))
+                              (format "at position (%s): "
+                                      (abaplib-srv-check-render-pos position))
+                              text)))
+        ))
+
+    (if output_log
+        (abaplib-util-log-buf-write output_log))
+
+    (cond ((string= severity_level "I")
+           (message "Syntax check completed with `success' result."))
+          ((string= severity_level "W")
+           (message "Syntax check completed with `warning' messages."))
+          ((string= severity_level "E")
+           (progn
+             (message "Syntax check completed with `error' messages.")
+             (abaplib-util-log-buf-pop))))
+    ))
+
+(defun abaplib-srv-check-prog (prog_name source &optional version )
+  "Check ABAP program syntax based on local unsubmitted source"
+  (let* ((version (or version "active"))
+         (adtcore_uri (concat "/sap/bc/adt/programs/programs/" prog_name))
+         (chkrun_uri  (concat adtcore_uri "/source/main"))
+         (chkrun_content (base64-encode-string source))
+         (post_data (abaplib-srv-check-syntax-template
+                     adtcore_uri
+                     chkrun_uri version chkrun_content)))
+    ;; before post
+    ;; (message post_data)
+    (abaplib-service-call
+     (abaplib-service-get-uri 'checkrun)
+     (lambda (&rest data)
+       (let* ((check_report (xml-get-children (cl-getf data :data) 'checkReport))
+              (message_list (xml-get-children (car check_report) 'checkMessageList))
+              (messages (xml-get-children (car message_list) 'checkMessage)))
+         (abaplib-srv-check-show-message messages)
+         ))
+     :parser 'abaplib-util-xml-parser
+     :type "POST"
+     :data post_data
+     :headers (list (cons "Content-Type" "application/vnd.sap.adt.checkobjects+xml"))
+     )
+    ))
 ;;========================================================================
 ;; Service - Push Source
 ;;========================================================================
