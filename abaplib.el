@@ -57,6 +57,9 @@
 
 ;; (defvar abaplib-system-ID nil
 ;;   "ABAP system client used for login.")
+(defvar abaplib--workspace-descriptor-cache nil
+  "Cache for workspace descriptor")
+
 (defvar abaplib--current-server nil
   "The address of the abap server host with port
    For instance: https://yourabapserver:44300/")
@@ -166,6 +169,13 @@
       (abaplib-util-jsonize-to-file nil describe-file))
     describe-file))
 
+(defun abaplib--get-workspace-descriptor()
+  "Get workspace descriptor"
+  (unless abaplib--workspace-descriptor-cache
+    (setq abaplib--workspace-descriptor-cache
+          (json-read-file (abaplib--get-ws-describe-file))))
+  abaplib--workspace-descriptor-cache)
+
 (defun abaplib--get-project-props (project)
   "Get project properties by project key.
    In current implemention should be symbol of project dir"
@@ -173,8 +183,8 @@
 
 (defun abaplib--add-project-to-ws(project-props)
   "When create or init project, add project information into workspace descriptor"
-  (let* ((descriptor (json-read-file (abaplib--get-ws-describe-file)))
-         (new-descriptor (abaplib-util-upsert-alists descriptor projet-props)))
+  (let* ((descriptor (abaplib--get-workspace-descriptor))
+         (new-descriptor (abaplib-util-upsert-alists descriptor project-props)))
     (abaplib-util-jsonize-to-file new-descriptor describe-file)))
 
 (defun abaplib-create-project (project-dir)
@@ -198,7 +208,7 @@
 
 (defun abaplib-get-project-list ()
   "Get project list described in workspace descriptor file <workspace_dir>/.abap_workspace"
-  (let ((descriptor (abaplib--get-ws-describe-file)))
+  (let ((descriptor (abaplib--get-workspace-descriptor)))
     (mapcar
      (lambda (project-props)
        (car project-props))
@@ -208,6 +218,14 @@
   "Switch variable `abaplib--current-project' and go to project directory"
   (setq abaplib--current-project project)
   (dired project))
+
+(defun abaplib-remove-project (project)
+  "Remove project from workspace"
+  (let ((descriptor (abaplib--get-workspace-descriptor)))
+    (mapcar
+     (lambda (project-props)
+       (car project-props))
+     descriptor)))
 
 ;; (defun abaplib-project-setup ()
 ;;   "Setup ABAP Project"

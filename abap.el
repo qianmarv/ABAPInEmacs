@@ -42,13 +42,13 @@
   (let* ((project-name (or (read-string "Project name (without blank): " )
                            (error "project name can't be empty")))
          (parent-dir (read-string "Workspace directory:" abap-workspace-dir))
-         (project-dir (expand-file-name project-name parent-dir)))
+         (project (expand-file-name project-name parent-dir)))
     (unless (file-directory-p parent-dir)
       (make-directory parent-dir))
-    (abaplib-create-project project-dir)))
+    (abaplib-create-project project)))
 
-(defun abap-init-project ()
-  "Init ABAP project"
+(defun abap-add-project ()
+  "Add ABAP project into workspace"
   (interactive)
   (let* ((current-dir (abaplib-util-current-dir))
          (project-dir (expand-file-name
@@ -56,10 +56,18 @@
                                     (abaplib-project-init-propose current-dir)))))
     (abaplib-create-project project-dir)))
 
-(defun abap-switch-project ()
+(defun abap-remove-project ()
+  "Remove ABAP project from workspace.
+  `Note:' this operation will not physically delete the project files."
   (interactive)
-  (let ((project-dir (completing-read "Select Project: " (abaplib-get-project-list))))
-    (abaplib-switch-project project-dir)))
+  (let ((project (completing-read "Select Project: " (abaplib-get-project-list))))
+    (abaplib-remove-project project)))
+
+(defun abap-switch-project ()
+  "Switch ABAP project"
+  (interactive)
+  (let ((project (completing-read "Select Project: " (abaplib-get-project-list))))
+    (abaplib-switch-project project)))
 
 (defun abap-get-current-project ()
   "Get current project, prompt user choose project if none"
