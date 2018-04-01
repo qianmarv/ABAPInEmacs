@@ -144,6 +144,15 @@
                   (message (buffer-string))
                   (buffer-string)) nil file))
 
+(defun abaplib-util-upsert-alists (alists pair)
+  "Append/Update alist with pair"
+  (let* ((key (intern (car pair)))
+         (existp (assoc key alists)))
+    (if existp
+        (setcdr (assoc key alists) (cdr pair))
+      (setq alists (append alists (list pair)))))
+  alists)
+
 ;;==============================================================================
 ;; Project
 ;;==============================================================================
@@ -157,27 +166,26 @@
       (abaplib-util-jsonize-to-file nil describe-file))
     describe-file))
 
-(defun abaplib--add-project-to-ws(project-dir)
+(defun abaplib--get-project-props (project)
+  "Get project properties by project key.
+   In current implemention should be symbol of project dir"
+  (assoc (intern project) (json-read-file (abaplib--get-ws-describe-file))))
+
+(defun abaplib--add-project-to-ws(project-props)
   "When create or init project, add project information into workspace descriptor"
-  (let* ((describe-file (abaplib--get-ws-describe-file))
-         (descriptor (json-read-file describe-file))
-         (project-exist-p (assoc (intern project-dir) descriptor)))
-    (unless project-exist-p
-      (let ((new-descriptor (append
-                             descriptor
-                             (list project-dir))))
-        (abaplib-util-jsonize-to-file new-descriptor describe-file)))))
+  (let* ((descriptor (json-read-file (abaplib--get-ws-describe-file)))
+         (new-descriptor (abaplib-util-upsert-alists descriptor projet-props)))
+    (abaplib-util-jsonize-to-file new-descriptor describe-file)))
 
 (defun abaplib-create-project (project-dir)
-  (let ((meta-dir (expand-file-name ".abap" project-dir)))
+  (let ((meta-dir (expand-file-name ".meta" project-dir)))
     ;; Create project directory
     (unless (file-directory-p project-dir)
       (make-directory project-dir))
     (if (file-directory-p meta-dir)
         (warn "Project %s already exist!" project-dir)
       (make-directory meta-dir))
-    (abaplib--add-project-to-ws project-dir)
-    (setq abaplib--current-project project-dir)
+    (abaplib--add-project-to-ws (cons project-dir nil))
     (abaplib-switch-project project-dir)))
 
 (defun abaplib-project-init-propose (dir)
@@ -190,18 +198,17 @@
 
 (defun abaplib-get-project-list ()
   "Get project list described in workspace descriptor file <workspace_dir>/.abap_workspace"
-  (let ((workspace-descriptor (expand-file-name ".abap_workspace" abap-workspace-dir)))
-    (with-temp-buffer
-      (insert-file-contents workspace-descriptor)
-      (split-string (buffer-string) "\n" t))))
+  (let ((descriptor (abaplib--get-ws-describe-file)))
+    (mapcar
+     (lambda (project-props)
+       (car project-props))
+     descriptor)))
 
-(defun abaplib-switch-project (project-dir)
+(defun abaplib-switch-project (project)
   "Switch variable `abaplib--current-project' and go to project directory"
-  (setq abaplib--current-project project-dir)
-  (dired project-dir))
+  (setq abaplib--current-project project)
+  (dired project))
 
-(defun abaplib-get-current-project ()
-  "Get current project, raise error if project not exist")
 ;; (defun abaplib-project-setup ()
 ;;   "Setup ABAP Project"
 ;;   (interactive
@@ -295,7 +302,10 @@
 ;;==============================================================================
 ;; Connect to Server
 ;;==============================================================================
-
+(defun abaplib-add-server-to-project (project server)
+  (let* ((project-props (abaplib--get-project-props project))
+         (new-props (abaplib-util-upsert project-props `(Server . ,server))))
+    (abaplib--add-project-to-ws new-props)))
 
 ;;==============================================================================
 ;; Core Services
@@ -810,5 +820,5 @@
      ))
   )
 
-(provide 'abaplib-core)
+(provide 'abaplib)
 ;;; abaplib.el ends here

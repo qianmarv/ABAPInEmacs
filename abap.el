@@ -61,6 +61,19 @@
   (let ((project-dir (completing-read "Select Project: " (abaplib-get-project-list))))
     (abaplib-switch-project project-dir)))
 
+(defun abap-get-current-project ()
+  "Get current project, prompt user choose project if none"
+  (unless abaplib--current-project
+    (call-interactively 'abap-switch-project))
+  abaplib--current-project)
+
+(defun abap-add-server ()
+  "Add server to current project"
+  (interactive)
+  (let ((server (read-string "Server https url: "))
+        (project (abap-get-current-project)))
+    (abaplib-add-server-to-project project server)))
+
 (defun abap-retrieve-object ()
   "Retrieve ABAP objects"
   (interactive
