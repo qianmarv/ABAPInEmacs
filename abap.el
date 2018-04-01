@@ -45,23 +45,27 @@
          (project (expand-file-name project-name parent-dir)))
     (unless (file-directory-p parent-dir)
       (make-directory parent-dir))
-    (abaplib-create-project project)))
+    (abaplib-create-project project)
+    (message "Project %s created and added to workspace." project)))
 
 (defun abap-add-project ()
   "Add ABAP project into workspace"
   (interactive)
   (let* ((current-dir (abaplib-util-current-dir))
-         (project-dir (expand-file-name
-                       (read-string "Init project: "
-                                    (abaplib-project-init-propose current-dir)))))
-    (abaplib-create-project project-dir)))
+         (project(expand-file-name
+                  (read-string "Init project: "
+                               (abaplib-project-init-propose current-dir)))))
+    (abaplib-create-project project)
+    (message "Project %s added to workspace." project)))
 
 (defun abap-remove-project ()
   "Remove ABAP project from workspace.
   `Note:' this operation will not physically delete the project files."
   (interactive)
-  (let ((project (completing-read "Select Project: " (abaplib-get-project-list))))
-    (abaplib-remove-project project)))
+  (let ((project (completing-read "Select Project: "
+                                  (abaplib-get-project-list))))
+    (abaplib-remove-project project)
+    (message "Project %s removed from workspace." project)))
 
 (defun abap-switch-project ()
   "Switch ABAP project"
@@ -78,9 +82,23 @@
 (defun abap-add-server ()
   "Add server to current project"
   (interactive)
-  (let ((server (read-string "Server https url: "))
-        (project (abap-get-current-project)))
-    (abaplib-add-server-to-project project server)))
+  (let ((project (abap-get-current-project))
+        (server (read-string "Server https url: ")))
+    (abaplib-add-server-to-project project server)
+    (message "Severl url %s added to current project" server)))
+
+(defun abap-login ()
+  "Login to server"
+  (interactive)
+  (let* ((project (abap-get-current-project))
+         (username (upcase (read-string "Username: ")))
+         (password (read-passwd "Password: "))
+         (client   (read-string "SAP Client: "  ))
+         (login-token (cons "Authorization"
+                            (format "Basic %s" (base64-encode-string
+                                                (concat username ":" password))))))
+    (message "Connecting...")
+    (abaplib-auth-login-with-token project login-token client)))
 
 (defun abap-retrieve-object ()
   "Retrieve ABAP objects"
