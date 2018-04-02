@@ -277,6 +277,7 @@
     (unless (file-exists-p cache-dir)
       (make-directory cache-dir))
     cache-dir))
+
 ;;==============================================================================
 ;; Authentication
 ;;==============================================================================
@@ -545,23 +546,23 @@
   (let* (
          ;; (project abaplib--current-project)
          (url (abaplib-get-project-api-url api))
-         (login-token (abaplib-get-login-token))
+         (login-token (cons "Authorization" (abaplib-get-login-token)))
          (sap-client (abaplib-get-sap-client ))
          (headers (cl-getf args :headers))
          (type    (or (cl-getf args :type) "GET"))
          (params (cl-getf args :params)))
 
     ;; For method like POST, PUT, DELETE, required to get CSRF Token first
-    (unless (string= type "GET")
+    (if (string= type "GET")
+        (setq headers (append headers (list login-token)))
       (let* ((login-url (abaplib-get-project-api-url abaplib--auth-uri))
              (response (request
                         login-url
                         :sync t
-                        :headers (list (cons "X-CSRF-Token" "Fetch"))
+                        :headers (list (cons "X-CSRF-Token" "Fetch")login-token)
                         :params `((sap-client . ,sap-client))))
              (csrf-token-string (request-response-header response "x-csrf-token")))
         (setq headers (append headers
-                              login-token
                               (list (cons "x-csrf-token" csrf-token-string))))))
 
     ;; TODO Delete :headers from args as we have explicitly put headers here

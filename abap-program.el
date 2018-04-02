@@ -36,16 +36,39 @@
 ;; TODO 4.2.1 => If Local File Exist => Compare (EDiff) and Prompt to User
 ;; 4.2.2 => No Local File => Directly Write to Local
 ;;==============================================================================
-(defun abap-program--get-properties (program-name)
-  " Get metadata from cache"
-  (let ((prop-file (expand-file-name (concat program-name ".prog.json"))))
-    (when (file-exists-p prop-file)
-      (json-read-file prop-file))))
 
-(defun abap-program--set-properties (program-name properties)
+(defvar-local abap-program--name nil
+  "ABAP program name")
+
+(defvar-local abap-program--properties-cache nil
+  "ABAP program properties")
+
+(defun abap-program--get-properties ()
+  " Get program properties"
+  (unless abap-program--name
+    (error "Program is nil"))
+  (unless abap-program--properties-cache
+    (let ((prop-file (expand-file-name (concat abap-program--name ".prog.json")
+                                       (abaplib-get-project-cache-dir))))
+      (when (file-exists-p prop-file)
+        (setq abap-program--properties-cache (json-read-file prop-file)))))
+  abap-program--properties-cache)
+
+(defun abap-program--get-property (key)
+  " Get program property by key"
+  (alist-get key (abap-program--get-properties)))
+
+(defun abap-program--set-properties(properties)
   " Get metadata from cache"
-  (let ((prop-file (expand-file-name (concat program-name ".prog.json"))))
-    (abaplib-util-jsonize-to-file properties prop-file)))
+  (let ((prop-file (expand-file-name (concat abap-program--name ".prog.json")
+                                     (abaplib-get-project-cache-dir))))
+    (setq abap-program--properties-cache properties)
+    (abaplib-util-jsonize-to-file (abap-program--get-properties) prop-file)))
+
+(defun abap-program--set-property (key value)
+  "Set property"
+  (abap-program--set-properties
+   (abaplib-util-upsert-alists (abap-program--get-properties) (cons key value))))
 
 (defun abap-program--parse-metadata (xml-node)
   (let* ((program-props)
@@ -53,41 +76,96 @@
          (version (xml-get-attribute xml-node 'version))
          (sourceUri (xml-get-attribute xml-node 'sourceUri))
          (etag))
+    (let ((links (xml-get-children xml-node 'link)))
+      (dolist (link links)
+        (when (string= (xml-get-attribute link 'type) "text/plain")
+          (setq etag (xml-get-attribute link 'etag))
+          (return))))
     (setq program-props (append (list `(type . ,type)
                                       `(version . ,version)
                                       `(sourceUri . ,sourceUri)
                                       `(etag . ,etag))))))
 
-(defun abap-program-retrieve(programe-name)
+(defun abap-program--get-directory ()
+  "Get program source directory"
+  (let* ((major-type-dir (expand-file-name "Source Code"
+                                           (abaplib-project-get-property 'path)))
+         (minor-type-dir (expand-file-name "Programs"
+                                           major-type-dir)))
+    (unless (file-exists-p major-type-dir)
+      (make-directory major-type-dir))
+    (unless (file-exists-p minor-type-dir)
+      (make-directory minor-type-dir))
+    minor-type-dir))
+
+(defun abap-program--get-source-file ()
+  (expand-file-name (concat abap-program--name ".prog.abap")
+                    (abap-program--get-directory)))
+
+(defun abap-program--retrieve-properties ()
+  " Get metadata from cache"
+  (let* ((url (abaplib-get-project-api-url (concat "/sap/bc/adt/programs/programs/"
+                                                   abap-program--name)))
+         (metadata-node (abaplib--rest-api-call url nil :parser 'abaplib-util-xml-parser ))
+         (program-props (abap-program--parse-metadata metadata-node)))
+    (abap-program--set-properties program-props)))
+
+(defun abap-program-retrieve(program-name)
   ;; Retrieve metadata
-  (let ((metadata-node (abaplib-service-call 'retrieve
-                                             `(PROG . ,program-name)) )))
-  (abaplib-service-call
-   'retrieve
-   '((type . prog)
-     (name . programe-name))
-   ;; (abaplib-service-get-uri 'get-program-metadata prog-name)
-   (lambda (&rest data)
-     (let ((prog-metadata (format "%s" (cl-getf data :data)))
-           (file (format "%s/%s.prog.xml" abaplib--project-config-dir prog-name)))
-       (write-region prog-metadata nil file)
-       ))
-   :parser 'abaplib-util-sourcecode-parser
-   )
-  ;; Retrieve source
-  ;; (abaplib-service-call
-  ;;  (abaplib-service-get-uri 'get-program-source prog-name)
-  ;;  (lambda (&rest data)
-  ;;    (let ((prog-source (format "%s" (cl-getf data :data)))
-  ;;          (file (format "%s/%s.prog.abap" abaplib--project-dir prog-name)))
-  ;;      (unless (string= prog-source "")
-  ;;        (write-region prog-source nil file)
-  ;;        nil
-  ;;        )))
-  ;;  :parser 'abaplib-util-sourcecode-parser
-   ;; :headers (list '("If-None-Match" . "201704241108050011")
-   ;;                '("Content-Type" . "plain/text"))
-   ))
+  (setq abap-program--name program-name)
+  (let* ((etag (abap-program--get-property 'etag))
+         (new-etag))
+    (abap-program--retrieve-properties) ;; Refresh properties
+    (setq new-etag (abap-program--get-property 'etag))
+
+    ;; (unless program-props
+    ;;   (abap-program--retrieve-properties))
+    (if (string= new-etag etag)
+        (message "Program source unchanged.")
+      (abaplib--rest-api-call
+       (abaplib-get-project-api-url (format
+                                     "/sap/bc/adt/programs/programs/%s/source/main"
+                                     program-name))
+       (lambda (&rest rest)
+         (let ((prog-source (format "%s" (cl-getf rest :data)))
+               ;; (new-etag (request-response-header (cl-getf rest :response) "ETag"))
+               (file (abap-program--get-source-file)))
+           (unless (string= prog-source "")
+             (write-region prog-source nil file)
+             (message "Program source retrieved."))
+           ;; (unless (string= etag new-etag)
+           ;;   (abap-program--retrieve-properties)) ;; Cause program error?
+           ))
+       :parser 'abaplib-util-sourcecode-parser
+       :headers (list `("If-None-Match" . ,etag)
+                      '("Content-Type" . "plain/text"))))))
+
+;; (abaplib-service-call
+;;  'retrieve
+;;  '((type . prog)
+;;    (name . programe-name))
+;;  ;; (abaplib-service-get-uri 'get-program-metadata prog-name)
+;;  (lambda (&rest data)
+;;    (let ((prog-metadata (format "%s" (cl-getf data :data)))
+;;          (file (format "%s/%s.prog.xml" abaplib--project-config-dir prog-name)))
+;;      (write-region prog-metadata nil file)
+;;      ))
+;;  :parser 'abaplib-util-sourcecode-parser
+;;  )
+;; Retrieve source
+;; (abaplib-service-call
+;;  (abaplib-service-get-uri 'get-program-source prog-name)
+;;  (lambda (&rest data)
+;;    (let ((prog-source (format "%s" (cl-getf data :data)))
+;;          (file (format "%s/%s.prog.abap" abaplib--project-dir prog-name)))
+;;      (unless (string= prog-source "")
+;;        (write-region prog-source nil file)
+;;        nil
+;;        )))
+;;  :parser 'abaplib-util-sourcecode-parser
+;; :headers (list '("If-None-Match" . "201704241108050011")
+;;                '("Content-Type" . "plain/text"))
+;; )
 
 (defun abap-program-check-syntax (prog-name source &optional version )
   "Check ABAP program syntax based on local unsubmitted source"
