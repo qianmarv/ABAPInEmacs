@@ -23,6 +23,10 @@
 ;; 
 
 ;;; Code:
+;; TODO Most of service function shouldn't bind tight with project
+;;      the `abaplib--current-project' should be considered as always
+;;      have value which guaranteed by outside consumer, otherwise consider
+;;      as an exception.
 
 ;; (eval-when-compile (require 'cl))
 (require 'request)
@@ -43,11 +47,11 @@
   :type 'number
   :group 'abap)
 
-;; (defvar abaplib--logon-token nil
-  ;; "ABAP token used for authentication.")
+(defvar abaplib--login-token-cache nil
+  "ABAP token used for authentication.")
 
-;; (defvar abaplib--logon-client nil
-  ;; "ABAP system logon client")
+(defvar abaplib--sap-client-cache nil
+  "ABAP system logon client")
 
 ;; (defvar abaplib--auth-data nil
 ;;   "System Login State")
@@ -95,7 +99,8 @@
 ;;==============================================================================
 (defun abaplib-util-current-dir ()
   (if buffer-file-name
-      (file-name-directory buffer-file-name)))
+      (file-name-directory buffer-file-name)
+    dired-directory))
 
 (defun abaplib-util-get-string-from-file (filePath)
   "Return filePath's file content."
@@ -197,9 +202,12 @@
          (new-props (abaplib-util-upsert-alists project-props property)))
     (abaplib-upsert-project new-props)))
 
-(defun abaplib-project-get-property (project key)
-  (cdr (assoc-string key
-                     (cdr (abaplib-get-project-props project)))))
+(defun abaplib-project-get-property (key &optional project)
+  (let ((project (or project abaplib--current-project)))
+    (unless project
+      (error "Missing project"))
+    (cdr (assoc-string key
+                     (cdr (abaplib-get-project-props project))))))
 
 (defun abaplib-upsert-project(project-props)
   "When create or init project, add project information into workspace descriptor"
@@ -208,16 +216,21 @@
     (abaplib-save-workspace-descriptor new-descriptor)))
 
 (defun abaplib-create-project (project-dir)
-  (let ((meta-dir (expand-file-name ".metadata" project-dir))
-        (project-props (cons (intern project-dir) (list (cons 'path project-dir)))))
-    ;; Create project directory
-    (unless (file-directory-p project-dir)
-      (make-directory project-dir))
-    (if (file-directory-p meta-dir)
-        (warn "Project %s already exist!" project-dir)
-      (make-directory meta-dir))
-    (abaplib-upsert-project project-props)
-    (abaplib-switch-project project-dir)))
+  "Create project, if already exist, do nothing"
+  (let* ((project-dir (replace-regexp-in-string "/$" "" project-dir))
+         (project-props-curr (abaplib-get-project-props project-dir))
+         (project-props-new (or project-props-curr
+                            (cons (intern project-dir)
+                                  (list (cons 'path project-dir))))))
+    ;; Warning if already exist
+    (if project-props-curr
+        (error "Project %s already exist!" project-dir)
+      (progn
+        ;; Create project directory
+        (unless (file-directory-p project-dir)
+          (make-directory project-dir))
+        (abaplib-upsert-project project-props)
+        (abaplib-switch-project project-dir)))))
 
 (defun abaplib-project-init-propose (dir)
   "Propose project automatically"
@@ -237,8 +250,7 @@
 
 (defun abaplib-switch-project (project)
   "Switch variable `abaplib--current-project' and go to project directory"
-  (setq abaplib--current-project project)
-  (dired project))
+  (setq abaplib--current-project project))
 
 (defun abaplib-remove-project (project)
   "Remove project from workspace"
@@ -249,6 +261,140 @@
                           descriptor)))
     (abaplib-save-workspace-descriptor new-descriptor)
     (setq abaplib--current-project nil)))
+
+(defun abaplib-get-project-api-url (api)
+  "Compose full API url"
+  (if (string-match "^http[s]*://" api) api
+    (concat (replace-regexp-in-string "/*$" "/"
+                                      (abaplib-project-get-property 'server))
+            (replace-regexp-in-string "^/*" "" api))))
+
+(defun abaplib-get-project-cache-dir ()
+  "Get project cache directory"
+  (let ((cache-dir (expand-file-name
+                    ".cache"
+                    (abaplib-project-get-property 'path))))
+    (unless (file-exists-p cache-dir)
+      (make-directory cache-dir))
+    cache-dir))
+;;==============================================================================
+;; Authentication
+;;==============================================================================
+
+
+(defun abaplib-add-server-to-project (project server)
+  (abaplib-project-set-property project (cons 'server server)))
+
+(defun abaplib-auth-login-with-token(project login-token sap-client)
+  "Login into ABAP Server with token"
+  (let ((url (abaplib-get-project-api-url login-uri))
+        (login-status))
+    (unless server
+      (error "Project %s not bind to any server" project))
+    (setq login-status
+          (request-response-symbol-status
+           (request
+            url
+            :sync t
+            :headers (list (cons "Authorization" login-token))
+            :params (list (cons "sap-client" sap-client))
+            )))
+
+    (unless (eq login-status 'success)
+      (error "Connect to server Failed!"))
+
+    (when abap-save-login-credential
+      (let ((login-credential (cons 'login_token login-token))
+            (sap-client       (cons 'sap_client sap-client)))
+        (message "%s" login-credential)
+        (abaplib-project-set-property project login-credential)
+        (abaplib-project-set-property project sap-client)))
+    (message "Connected to server!")))
+
+(defun abaplib-get-login-token ()
+  "Get login token and validate `abaplib--login-token-cache'"
+  (let ((login-token (or abaplib--login-token-cache
+                         (abaplib-project-get-property 'login_token))))
+    (unless login-token
+      (error "Please login first"))
+    (setq abaplib--login-token-cache login-token)))
+
+(defun abaplib-get-sap-client ()
+  "Get sap client and validate `abaplib--sap-client-cache'"
+  (let ((sap-client (or abaplib--sap-client-cache
+                        (abaplib-project-get-property 'sap_client))))
+    (unless sap-client
+      (error "Please login first"))
+    (setq abaplib--sap-client-cache sap-client)))
+
+;; (defun abaplib-auth-ensure-login ()
+;;   "Ensure logged In"
+;;   (abaplib-ensure-inside-project)
+;;   (let* ((projectp (intern (or abaplib--project-name
+;;                                (call-interactively 'abaplib-project-switch))))
+;;          (is-logged (alist-get projectp abaplib--auth-data)))
+;;     (unless is-logged ;; Try to login if not logged in
+;;       (call-interactively 'abaplib-auth-login)))
+;;   )
+
+;; (defun abaplib-auth-set-login-token (projectp token)
+;;   (let ((login-token (list (cons 'login-token (list token)))))
+;;     (setcdr (assq 'ER9 abaplib--auth-data)
+;;             (append login-token (alist-get 'ER9 abaplib--auth-data))
+;;             )))
+
+;; (defun abaplib-auth-get-login-token (projectp)
+;;   (alist-get 'login-token (alist-get projectp abaplib--auth-data)))
+
+;; (defun abaplib-auth-set-csrf-token (projectp token)
+;;   (let ((csrf-token (list (cons 'csrf-token (list token)))))
+;;     (setcdr (assq 'ER9 abaplib--auth-data)
+;;             (append csrf-token (alist-get 'ER9 abaplib--auth-data))
+;;             )))
+
+;; (defun abaplib-auth-get-csrf-token (projectp)
+;;   (alist-get 'csrf-token (alist-get projectp abaplib--auth-data)))
+
+;; (defun abaplib-auth-refresh-session ()
+;;   (interactive)
+;;   (let* ((projectp (intern abaplib--project-name))
+;;          (login-token (car (abaplib-auth-get-login-token projectp))))
+;;     (if login-token
+;;         (abaplib-auth-login-with-token login-token)
+;;       (abaplib-auth-login))))
+
+
+;; (defun abaplib-auth-login-with-token (login-token client)
+;;   "Login into ABAP Server with token"
+;;   (let* ((project abaplib--current-project)
+;;          (login-uri "/sap/bc/adt/core/discovery")
+;;          (response (request
+;;                     (concat  abaplib--current-server
+;;                              (replace-regexp-in-string "^/*" "" login-uri))
+;;                     :sync t
+;;                     :headers (list login-token (cons "X-CSRF-Token" "Fetch"))
+;;                     :params (list (cons "sap-client" client))
+;;                     ))
+;;          (login-status (request-response-symbol-status response))
+;;          (csrf-token (cons "x-csrf-token" (request-response-header response "x-csrf-token"))))
+
+;;     (if (not (eq login-status 'success))
+;;         (error "Connect to server Failed!")
+;;       "Init project auth data"
+;;       (if (alist-get projectp abaplib--auth-data)
+;;           ;; Remove previous login data
+;;           (setcdr (assq projectp abaplib--auth-data)
+;;                   t)
+;;         (add-to-list 'abaplib--auth-data (cons projectp t))
+;;         )
+
+;;       (abaplib-auth-set-login-token projectp login-token)
+;;       (abaplib-auth-set-csrf-token projectp csrf-token)
+
+;;       (setq abaplib--auth-client client)
+;;       (message "Connected to server!"))
+;;     nil
+;;     ))
 
 ;; (defun abaplib-project-setup ()
 ;;   "Setup ABAP Project"
@@ -365,7 +511,7 @@
       args: could be used to put additional args for request call
   "
   (case service
-    ('search (abaplib--do-search abap-object))
+    ('search (abaplib-service-do-search abap-object))
     ('retrieve )
     ('lock )
     ('unlock )
@@ -376,7 +522,7 @@
 (defun abaplib-service-get-uri (service &optional object-name)
   (cond
    ((eq service 'search-object)
-    (format "/sap/bc/adt/repository/informationsystem/search?operation=quickSearch&query=%s&maxResults=%s" object-name abap-query-list-max-result))
+    (format "/sap/bc/adt/repository/informationsystem/search?operation=quickSearch&query=%s&maxResults=%s" object-name abap-search-list-max-result))
    ((eq service 'get-program-metadata)
     (format "/sap/bc/adt/programs/programs/%s" object-name))
    ((eq service 'get-program-source)
@@ -394,177 +540,123 @@
    (t (error "Service not implemented!"))
    ))
 
-(defun abaplib-rest-call(api success-callback &rest args)
-  "Invoke corresponding service API."
-  (abaplib-auth-ensure-login)
-
-  (let* ((projectp (intern abaplib--project-name))
-         (login-token (abaplib-auth-get-login-token projectp))
-         (csrf-token (abaplib-auth-get-csrf-token projectp))
+(defun abaplib--rest-api-call(api success-callback &rest args)
+  "Call service API."
+  (let* (
+         ;; (project abaplib--current-project)
+         (url (abaplib-get-project-api-url api))
+         (login-token (abaplib-get-login-token))
+         (sap-client (abaplib-get-sap-client ))
          (headers (cl-getf args :headers))
-         (type    (cl-getf args :type)))
+         (type    (or (cl-getf args :type) "GET"))
+         (params (cl-getf args :params)))
 
-    ;; For method like POST, PUT, DELETE, etc Required to Validate CSRF Token
-    (unless (or (not type)
-                (string= type "GET"))
-      (setq headers (append headers
-                            ;; login-token
-                            csrf-token)))
-    ;; (let* ((response (request
-    ;;                  (concat  abaplib--current-server
-    ;;                           (replace-regexp-in-string "^/*" "" "/sap/bc/adt/core/discovery"))
-    ;;                  :sync t
-    ;;                  :headers (list (cons "X-CSRF-Token" "Fetch"))
-    ;;                  :params `((sap-client . ,abaplib--auth-client))
-    ;;                  ))
-    ;;        (csrf-token (list (cons "x-csrf-token"
-    ;;                                (request-response-header response "x-csrf-token")))))
-    ;;   (setq headers (append headers csrf-token login-token))))
+    ;; For method like POST, PUT, DELETE, required to get CSRF Token first
+    (unless (string= type "GET")
+      (let* ((login-url (abaplib-get-project-api-url abaplib--auth-uri))
+             (response (request
+                        login-url
+                        :sync t
+                        :headers (list (cons "X-CSRF-Token" "Fetch"))
+                        :params `((sap-client . ,sap-client))))
+             (csrf-token-string (request-response-header response "x-csrf-token")))
+        (setq headers (append headers
+                              login-token
+                              (list (cons "x-csrf-token" csrf-token-string))))))
 
-    ;; TODO Delete :headers from args
+    ;; TODO Delete :headers from args as we have explicitly put headers here
+    (setq params (append params
+                         (list (cons "sap-client" sap-client))))
     (append (request-response-data
-             (apply #'request (if (string-match "^http[s]*://" api) api
-                                (concat (replace-regexp-in-string "/*$" "/" abaplib--current-server)
-                                        (replace-regexp-in-string "^/*" "" api)))
+             (apply #'request
+                    url
                     :sync (not success-callback)
                     :headers headers
-                    :status-code '((304 . (lambda (&rest -) (message "304 Source Not Modified")))
-                                   (401 . (lambda (&rest -) (message "401 Not Authorized")))
-                                   (403 . (lambda (&rest -) (message "403 Forbidden")))
-                                   )
-                    ;; :params `((sap-client . ,abaplib--auth-client))
+                    :status-code '((304 . (lambda (&rest _) (message "304 Source Not Modified")))
+                                   (401 . (lambda (&rest _) (message "401 Not Authorized")))
+                                   (403 . (lambda (&rest _) (message "403 Forbidden"))))
+                    :params params
                     :success success-callback
-                    :error  (lambda (&key error-thrown &allow-other-keys &rest -)
+                    :error  (lambda (&key error-thrown &allow-other-keys &rest _)
                               (let ((error-message)))
                               (if error-thrown
-                                  (setq error-message ((lambda (exception-node) 
+                                  (setq error-message ((lambda (exception-node)
                                                          (car (last
                                                                (car (xml-get-children exception-node 'localizedMessage)))))
                                                        error-thrown))
-                                (setq error-message "Unknown"))
-                              (message error-message))
+                                (setq error-message "Unknown error occured."))
+                              (message "%s" error-message))
                     ;; :complete (lambda (&rest -) (message "Complete" ))
-                    args))
-            nil))
-  )
+                    args)))))
+;; (defun abaplib--rest-call(api success-callback &rest args)
+;;   "Invoke corresponding service API."
+;;   (abaplib-auth-ensure-login)
 
-
-;;==============================================================================
-;; Authentication
-;;==============================================================================
-
-;; (defun abaplib-auth-set-login-token (projectp token)
-;;   (let ((login-token (list (cons 'login-token (list token)))))
-;;     (setcdr (assq 'ER9 abaplib--auth-data)
-;;             (append login-token (alist-get 'ER9 abaplib--auth-data))
-;;             )))
-
-;; (defun abaplib-auth-get-login-token (projectp)
-;;   (alist-get 'login-token (alist-get projectp abaplib--auth-data)))
-
-;; (defun abaplib-auth-set-csrf-token (projectp token)
-;;   (let ((csrf-token (list (cons 'csrf-token (list token)))))
-;;     (setcdr (assq 'ER9 abaplib--auth-data)
-;;             (append csrf-token (alist-get 'ER9 abaplib--auth-data))
-;;             )))
-
-;; (defun abaplib-auth-get-csrf-token (projectp)
-;;   (alist-get 'csrf-token (alist-get projectp abaplib--auth-data)))
-
-;; (defun abaplib-auth-refresh-session ()
-;;   (interactive)
 ;;   (let* ((projectp (intern abaplib--project-name))
-;;          (login-token (car (abaplib-auth-get-login-token projectp))))
-;;     (if login-token
-;;         (abaplib-auth-login-with-token login-token)
-;;       (abaplib-auth-login))))
+;;          (login-token (abaplib-auth-get-login-token projectp))
+;;          (csrf-token (abaplib-auth-get-csrf-token projectp))
+;;          (headers (cl-getf args :headers))
+;;          (type    (cl-getf args :type)))
 
-(defun abaplib-add-server-to-project (project server)
-  (abaplib-project-set-property project (cons 'server server)))
+;;     ;; For method like POST, PUT, DELETE, etc Required to Validate CSRF Token
+;;     (unless (or (not type)
+;;                 (string= type "GET"))
+;;       (setq headers (append headers
+;;                             ;; login-token
+;;                             csrf-token)))
+;;     ;; (let* ((response (request
+;;     ;;                  (concat  abaplib--current-server
+;;     ;;                           (replace-regexp-in-string "^/*" "" "/sap/bc/adt/core/discovery"))
+;;     ;;                  :sync t
+;;     ;;                  :headers (list (cons "X-CSRF-Token" "Fetch"))
+;;     ;;                  :params `((sap-client . ,abaplib--auth-client))
+;;     ;;                  ))
+;;     ;;        (csrf-token (list (cons "x-csrf-token"
+;;     ;;                                (request-response-header response "x-csrf-token")))))
+;;     ;;   (setq headers (append headers csrf-token login-token))))
 
-(defun abaplib-auth-login-with-token(project login-token client)
-  "Login into ABAP Server with token"
-  (let ((server (abaplib-project-get-property project 'server))
-        (login-uri abaplib--auth-uri)
-        (login-status))
-    (unless server
-      (error "Project %s not bind to any server" project))
-    (setq login-status
-          (request-response-symbol-status
-           (request
-            (concat  server
-                     (replace-regexp-in-string "^/*" "" login-uri))
-            :sync t
-            :headers (list login-token)
-            :params (list (cons "sap-client" client))
-            )))
+;;     ;; TODO Delete :headers from args
+;;     (append (request-response-data
+;;              (apply #'request (if (string-match "^http[s]*://" api) api
+;;                                 (concat (replace-regexp-in-string "/*$" "/" abaplib--current-server)
+;;                                         (replace-regexp-in-string "^/*" "" api)))
+;;                     :sync (not success-callback)
+;;                     :headers headers
+;;                     :status-code '((304 . (lambda (&rest -) (message "304 Source Not Modified")))
+;;                                    (401 . (lambda (&rest -) (message "401 Not Authorized")))
+;;                                    (403 . (lambda (&rest -) (message "403 Forbidden")))
+;;                                    )
+;;                     ;; :params `((sap-client . ,abaplib--auth-client))
+;;                     :success success-callback
+;;                     :error  (lambda (&key error-thrown &allow-other-keys &rest -)
+;;                               (let ((error-message)))
+;;                               (if error-thrown
+;;                                   (setq error-message ((lambda (exception-node) 
+;;                                                          (car (last
+;;                                                                (car (xml-get-children exception-node 'localizedMessage)))))
+;;                                                        error-thrown))
+;;                                 (setq error-message "Unknown"))
+;;                               (message error-message))
+;;                     ;; :complete (lambda (&rest -) (message "Complete" ))
+;;                     args))
+;;             nil))
+;;   )
 
-    (unless (eq login-status 'success)
-      (error "Connect to server Failed!"))
-
-    (when abap-save-login-credential
-      (let ((login-credential (cons 'login_token login-token))
-            (sap-client       (cons 'sap_client sap-client)))
-        (abaplib-project-set-property project login-credential)
-        (abaplib-project-set-property project sap-client)))
-    (message "Connected to server!")))
-
-;; (defun abaplib-auth-login-with-token (login-token client)
-;;   "Login into ABAP Server with token"
-;;   (let* ((project abaplib--current-project)
-;;          (login-uri "/sap/bc/adt/core/discovery")
-;;          (response (request
-;;                     (concat  abaplib--current-server
-;;                              (replace-regexp-in-string "^/*" "" login-uri))
-;;                     :sync t
-;;                     :headers (list login-token (cons "X-CSRF-Token" "Fetch"))
-;;                     :params (list (cons "sap-client" client))
-;;                     ))
-;;          (login-status (request-response-symbol-status response))
-;;          (csrf-token (cons "x-csrf-token" (request-response-header response "x-csrf-token"))))
-
-;;     (if (not (eq login-status 'success))
-;;         (error "Connect to server Failed!")
-;;       "Init project auth data"
-;;       (if (alist-get projectp abaplib--auth-data)
-;;           ;; Remove previous login data
-;;           (setcdr (assq projectp abaplib--auth-data)
-;;                   t)
-;;         (add-to-list 'abaplib--auth-data (cons projectp t))
-;;         )
-
-;;       (abaplib-auth-set-login-token projectp login-token)
-;;       (abaplib-auth-set-csrf-token projectp csrf-token)
-
-;;       (setq abaplib--auth-client client)
-;;       (message "Connected to server!"))
-;;     nil
-;;     ))
-
-(defun abaplib-auth-ensure-login ()
-  "Ensure logged In"
-  (abaplib-ensure-inside-project)
-  (let* ((projectp (intern (or abaplib--project-name
-                               (call-interactively 'abaplib-project-switch))))
-         (is-logged (alist-get projectp abaplib--auth-data)))
-    (unless is-logged ;; Try to login if not logged in
-      (call-interactively 'abaplib-auth-login)))
-  )
 
 ;;==============================================================================
 ;; Services Implementation - Search ABAP Object
 ;;==============================================================================
 
-(defun abaplib-do-search (query-string)
+(defun abaplib-service-do-search (query-string)
   "Search ABAP objects in server in synchronouse call"
-  (let* ((api "/sap/bc/adt/repository/informationsystem/search")
+  (let* ((url (abaplib-get-project-api-url "/sap/bc/adt/repository/informationsystem/search"))
          (params `((operation . "quickSearch")
-                   (query . ,query-string)
-                   (maxResult . ,abap-query-list-max-result)))
-         (data (abaplib--rest-call api
-                                   nil
-                                   :params params
-                                   :parser 'abaplib-util-xml-parser))
+                   (query . ,(concat "*" query-string "*"))
+                   (maxResult . ,abap-search-list-max-result)))
+         (data (abaplib--rest-api-call url
+                                       nil
+                                       :params params
+                                       :parser 'abaplib-util-xml-parser))
          (object-list (xml-get-children data 'objectReference)))
     (mapcar (lambda (obj)
               (let* (

@@ -26,7 +26,7 @@
 
 (require 'abap-mode)
 (require 'abaplib)
-;; (require 'abap-program)
+(require 'abap-program)
 
 ;; (defun abap-development ()
 ;;   (interactive)
@@ -71,7 +71,8 @@
   "Switch ABAP project"
   (interactive)
   (let ((project (completing-read "Select Project: " (abaplib-get-project-list))))
-    (abaplib-switch-project project)))
+    (abaplib-switch-project project)
+    (dired project)))
 
 (defun abap-get-current-project ()
   "Get current project, prompt user choose project if none"
@@ -94,16 +95,16 @@
          (username (upcase (read-string "Username: ")))
          (password (read-passwd "Password: "))
          (client   (read-string "SAP Client: "  ))
-         (login-token (cons "Authorization"
-                            (format "Basic %s" (base64-encode-string
-                                                (concat username ":" password))))))
+         (login-token (format "Basic %s" (base64-encode-string
+                                          (concat username ":" password)))))
     (message "Connecting...")
     (abaplib-auth-login-with-token project login-token client)))
 
 (defun abap-retrieve-object ()
   "Retrieve ABAP objects"
   (interactive
-   (let* ((object-name (read-string "Enter Search String: "))
+   (let* ((project (abap-get-current-project))
+          (object-name (read-string "Enter Search String: "))
           (object-list (abaplib-service-call 'search object-name))
           (selected-object (split-string
                             (completing-read "Maching Items: " object-list)
@@ -112,7 +113,7 @@
           (object-type (car selected-object))
           (object-name (car (cdr selected-object))))
 
-     (cond ((string= object-type "PROG/P" ) (abaplib-core-pull-prog object-name))
+     (cond ((string= object-type "PROG/P" ) (abap-program-retrieve object-name))
            ((string= object-type "DDLS/DL") (message "TODO: Handle Retrieve CDS - Data Definition"))
            ((string= object-type "DDLS/DF") (message "TODO: Handle Retrieve CDS - Entity"))
            ((string= object-type "DCLS/DL") (message "TODO: Handle Retrieve CDS - Access Control"))

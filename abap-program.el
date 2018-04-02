@@ -36,8 +36,32 @@
 ;; TODO 4.2.1 => If Local File Exist => Compare (EDiff) and Prompt to User
 ;; 4.2.2 => No Local File => Directly Write to Local
 ;;==============================================================================
+(defun abap-program--get-properties (program-name)
+  " Get metadata from cache"
+  (let ((prop-file (expand-file-name (concat program-name ".prog.json"))))
+    (when (file-exists-p prop-file)
+      (json-read-file prop-file))))
+
+(defun abap-program--set-properties (program-name properties)
+  " Get metadata from cache"
+  (let ((prop-file (expand-file-name (concat program-name ".prog.json"))))
+    (abaplib-util-jsonize-to-file properties prop-file)))
+
+(defun abap-program--parse-metadata (xml-node)
+  (let* ((program-props)
+         (type (xml-get-attribute xml-node 'type))
+         (version (xml-get-attribute xml-node 'version))
+         (sourceUri (xml-get-attribute xml-node 'sourceUri))
+         (etag))
+    (setq program-props (append (list `(type . ,type)
+                                      `(version . ,version)
+                                      `(sourceUri . ,sourceUri)
+                                      `(etag . ,etag))))))
+
 (defun abap-program-retrieve(programe-name)
   ;; Retrieve metadata
+  (let ((metadata-node (abaplib-service-call 'retrieve
+                                             `(PROG . ,program-name)) )))
   (abaplib-service-call
    'retrieve
    '((type . prog)
@@ -51,16 +75,16 @@
    :parser 'abaplib-util-sourcecode-parser
    )
   ;; Retrieve source
-  (abaplib-service-call
-   (abaplib-service-get-uri 'get-program-source prog-name)
-   (lambda (&rest data)
-     (let ((prog-source (format "%s" (cl-getf data :data)))
-           (file (format "%s/%s.prog.abap" abaplib--project-dir prog-name)))
-       (unless (string= prog-source "")
-         (write-region prog-source nil file)
-         nil
-         )))
-   :parser 'abaplib-util-sourcecode-parser
+  ;; (abaplib-service-call
+  ;;  (abaplib-service-get-uri 'get-program-source prog-name)
+  ;;  (lambda (&rest data)
+  ;;    (let ((prog-source (format "%s" (cl-getf data :data)))
+  ;;          (file (format "%s/%s.prog.abap" abaplib--project-dir prog-name)))
+  ;;      (unless (string= prog-source "")
+  ;;        (write-region prog-source nil file)
+  ;;        nil
+  ;;        )))
+  ;;  :parser 'abaplib-util-sourcecode-parser
    ;; :headers (list '("If-None-Match" . "201704241108050011")
    ;;                '("Content-Type" . "plain/text"))
    ))
@@ -107,5 +131,5 @@
      :headers `(("Content-Type" . "text/plain"))
      :params `(("lockHandle" . ,lock-handle))
      )))
-(provide 'abaplib-programs)
+(provide 'abap-program)
 ;;; abaplib_programs.el ends here
