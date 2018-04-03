@@ -487,12 +487,11 @@
 ;;                   buffer-file-name)))
 ;;     ))
 
-;;==============================================================================
-;; Server
-;;==============================================================================
+
 ;;==============================================================================
 ;; Core Services
 ;;==============================================================================
+(defun abaplib-core-)
 (defun abaplib-service-call (service abap-object &optional success-callback)
   " ABAP Service Call
     Paramters:
@@ -966,5 +965,5 @@
      ))
   )
 
-(provide 'abaplib)
+(provide 'abaplib-core)
 ;;; abaplib.el ends here

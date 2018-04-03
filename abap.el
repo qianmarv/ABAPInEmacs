@@ -25,8 +25,8 @@
 ;;; Code:
 
 (require 'abap-mode)
-(require 'abaplib)
-(require 'abap-program)
+(require 'abaplib-core)
+(require 'abaplib-program)
 
 ;; (defun abap-development ()
 ;;   (interactive)
@@ -111,9 +111,12 @@
                             " "
                             t))
           (object-type (car selected-object))
+          
           (object-name (car (cdr selected-object))))
+     (when )
 
      (cond ((string= object-type "PROG/P" ) (abap-program-retrieve object-name))
+           ((string= object-type "PROG/I" ) (abap-program-retrieve object-name))
            ((string= object-type "DDLS/DL") (message "TODO: Handle Retrieve CDS - Data Definition"))
            ((string= object-type "DDLS/DF") (message "TODO: Handle Retrieve CDS - Entity"))
            ((string= object-type "DCLS/DL") (message "TODO: Handle Retrieve CDS - Access Control"))
@@ -126,6 +129,33 @@
    ;; Write File & Open File
    ))
 
+(defun abap-service-dispatch (service object-property &optional success-callback)
+  " ABAP Service Dispatch
+    Paramters:
+      service: could be one of
+        - `search'
+        - `retrieve'
+        - `lock'
+        - `unlock'
+        - `check'
+        - `submit'
+        - `activate'
+      abap-object: could be string or alist of abap-object with key
+        - `type'
+        - `name'
+        - `source'
+      success-callback: callback function when service call finished with `success' status
+      args: could be used to put additional args for request call
+  "
+  (let ((major-type (intern (substring object-type 0 4)))
+        (service-function (case service
+                            ('search 'abaplib-service-do-search)
+                            ('lock   'abaplib-service-do-lock)
+                            ('unlock 'abaplib-service-do-unlock)
+                            ('retrieve 'abaplib-program-retrieve ))))
+    
+    (case major-type
+      ('PROG ))))
 
 (provide 'abap)
 ;;; abap-in-emacs.el ends here

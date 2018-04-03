@@ -24,7 +24,7 @@
 
 ;;; Code:
 
-(require 'abaplib)
+(require 'abaplib-core)
 ;;==============================================================================
 ;; Retrieve Program Source From Server
 ;; TODO Consider ETag
@@ -156,33 +156,6 @@
       (abap-program--retrieve-properties program-name metadata-etag)
       (abap-program--retrieve-source program-name source-etag))))
 
-;; (abaplib-service-call
-;;  'retrieve
-;;  '((type . prog)
-;;    (name . programe-name))
-;;  ;; (abaplib-service-get-uri 'get-program-metadata prog-name)
-;;  (lambda (&rest data)
-;;    (let ((prog-metadata (format "%s" (cl-getf data :data)))
-;;          (file (format "%s/%s.prog.xml" abaplib--project-config-dir prog-name)))
-;;      (write-region prog-metadata nil file)
-;;      ))
-;;  :parser 'abaplib-util-sourcecode-parser
-;;  )
-;; Retrieve source
-;; (abaplib-service-call
-;;  (abaplib-service-get-uri 'get-program-source prog-name)
-;;  (lambda (&rest data)
-;;    (let ((prog-source (format "%s" (cl-getf data :data)))
-;;          (file (format "%s/%s.prog.abap" abaplib--project-dir prog-name)))
-;;      (unless (string= prog-source "")
-;;        (write-region prog-source nil file)
-;;        nil
-;;        )))
-;;  :parser 'abaplib-util-sourcecode-parser
-;; :headers (list '("If-None-Match" . "201704241108050011")
-;;                '("Content-Type" . "plain/text"))
-;; )
-
 (defun abap-program-check-syntax (prog-name source &optional version )
   "Check ABAP program syntax based on local unsubmitted source"
   (let* ((version (or version "active"))
@@ -225,5 +198,5 @@
      :headers `(("Content-Type" . "text/plain"))
      :params `(("lockHandle" . ,lock-handle))
      )))
-(provide 'abap-program)
+(provide 'abaplib-program)
 ;;; abaplib_programs.el ends here
