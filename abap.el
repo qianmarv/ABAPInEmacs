@@ -1,20 +1,4 @@
-;;; abap-in-emacs.el --- ABAP Development in Emacs   -*- lexical-binding: t; -*-
-
-;; Copyright (C) 2018  Marvin Qian
-
-;; Author: Marvin Qian <qianmarv@gmail.com>
-;; Keywords: 
-
-;; This program is free software; you can redistribute it and/or modify
-;; it under the terms of the GNU General Public License as published by
-;; the Free Software Foundation, either version 3 of the License, or
-;; (at your option) any later version.
-
-;; This program is distributed in the hope that it will be useful,
-;; but WITHOUT ANY WARRANTY; without even the implied warranty of
-;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-;; GNU General Public License for more details.
-
+;;; abap-in-emacs.el --- ABAP Development in Emacs   -*- lexical-binding: t; -*- ;; Copyright (C) 2018  Marvin Qian ;; Author: Marvin Qian <qianmarv@gmail.com> ;; Keywords: ;; This program is free software; you can redistribute it and/or modify ;; it under the terms of the GNU General Public License as published by ;; the Free Software Foundation, either version 3 of the License, or ;; (at your option) any later version. ;; This program is distributed in the hope that it will be useful,;; but WITHOUT ANY WARRANTY; without even the implied warranty of ;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the ;; GNU General Public License for more details. 
 ;; You should have received a copy of the GNU General Public License
 ;; along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
@@ -24,14 +8,14 @@
 
 ;;; Code:
 
-(require 'abap-mode)
+;; (require 'abap-mode)
 (require 'abaplib-core)
 (require 'abaplib-program)
 
 
-(defvar-local abap--dev-object nil
-  "ABAP development Object
-   alist with name and type")
+;; (defvar-local abap--dev-object nil
+;; "ABAP development Object
+;; alist with name and type")
 ;;==============================================================================
 ;; Project
 ;;==============================================================================
@@ -112,37 +96,48 @@
                             t))
           (object-type (car selected-object))
           (object-name (car (cdr selected-object))))
-     (setq abap--dev-object (list `(name . ,object-name)
-                                  `(type . ,object-type)))
-     (abap-retrieve-source))))
+     (abap-retrieve-source (list `(name . ,object-name)
+                                 `(type . ,object-type))))))
 
-(defun abap-retrieve-source ()
+(defun abap-retrieve-source (&optional dev-object)
   "Retrieve source"
   (interactive)
-  (abap-service-dispatch 'retrieve))
+  (let ((dev-object (or dev-object
+                        (abap-get-dev-obj-from-file))))
+    (abaplib-core-service-dispatch 'retrieve)))
 
-(defun abap-check-source ()
+(defun abap-check-source (&optional dev-object)
   "Check source"
   (interactive)
-  (abap-service-dispatch 'check))
+  (let ((dev-object (or dev-object
+                        (abap-get-dev-obj-from-file))))
+    (abaplib-core-service-dispatch 'check)))
+
 
 (defun abap-submit-source ()
   "Submit source"
   (interactive)
-  (abap-service-dispatch 'submit))
+  (let ((dev-object (or dev-object
+                        (abap-get-dev-obj-from-file))))
+    (abaplib-core-service-dispatch 'submit)))
 
 (defun abap-activate-source ()
   "Activate source"
   (interactive)
-  (abap-service-dispatch 'activate))
+  (let ((dev-object (or dev-object
+                        (abap-get-dev-obj-from-file))))
+    (abaplib-core-service-dispatch 'activate)))
 
 
-
-(defun abap-init-local-env()
+(defun abap-get-dev-obj-from-file()
   (let* ((file-name (file-name-nondirectory (buffer-file-name)))
-         (components  (split-string file-name "\\." t))
-         (object-name (car components))
-         (sub-type (car (cdr components))))))
+         (components  (reverse (split-string file-name "\\." t)))
+         (object-name (car (last components)))
+         (object-type (upcase (nth 1 components))))
+    (unless (find object-type abaplib-core--supported-type)
+      (error "Object type %s not support." object-type))
+    `((name . ,object-name)
+      (type . ,object-type))))
 
 (provide 'abap)
 ;;; abap-in-emacs.el ends here

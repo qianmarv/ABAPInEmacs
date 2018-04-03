@@ -53,6 +53,10 @@
 (defvar abaplib--sap-client-cache nil
   "ABAP system logon client")
 
+(defconst abaplib-core--supported-type
+  '(PROG CLAS DCLS DDLS)
+  "Supported ABAP Development Object Type")
+
 ;; (defvar abaplib--auth-data nil
 ;;   "System Login State")
 
@@ -601,23 +605,20 @@
 ;;==============================================================================
 ;; Describe Object - Bufer/File Related
 ;;==============================================================================
-(defun abaplib-core-service-dispatch (service)
+(defun abaplib-core-service-dispatch (service object)
   " ABAP Service Dispatch
     Paramters:
       service: could be one of
+        - `search'
         - `retrieve'
         - `check'
         - `submit'
         - `activate'
-  "
-  (let* ((current-file (file-name-nondirectory (buffer-file-name)))
-         (service-function (case service
-                             ('search 'abaplib-service-do-search)
-                             ('lock   'abaplib-service-do-lock)
-                             ('unlock 'abaplib-service-do-unlock)
-                             ('retrieve 'abaplib-program-retrieve ))))
-    (case major-type
-      ('PROG ))))
+        - `lock'
+        - `unlock'
+   There're specific implenmentation for each service need to be done."
+
+  ())
 
   (defun abaplib-object-describe()
     (abaplib-ensure-inside-project)
