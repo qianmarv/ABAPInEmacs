@@ -28,10 +28,10 @@
 (require 'abaplib-core)
 (require 'abaplib-program)
 
-;; (defun abap-development ()
-;;   (interactive)
-;;   )
 
+(defvar-local abap--dev-object nil
+  "ABAP development Object
+   alist with name and type")
 ;;==============================================================================
 ;; Project
 ;;==============================================================================
@@ -111,51 +111,38 @@
                             " "
                             t))
           (object-type (car selected-object))
-          
           (object-name (car (cdr selected-object))))
-     (when )
+     (setq abap--dev-object (list `(name . ,object-name)
+                                  `(type . ,object-type)))
+     (abap-retrieve-source))))
 
-     (cond ((string= object-type "PROG/P" ) (abap-program-retrieve object-name))
-           ((string= object-type "PROG/I" ) (abap-program-retrieve object-name))
-           ((string= object-type "DDLS/DL") (message "TODO: Handle Retrieve CDS - Data Definition"))
-           ((string= object-type "DDLS/DF") (message "TODO: Handle Retrieve CDS - Entity"))
-           ((string= object-type "DCLS/DL") (message "TODO: Handle Retrieve CDS - Access Control"))
-           ((string= object-type "CLAS/OC") (message "TODO: Handle Retrieve Class")))
-     nil
-     )
-   ;; Retrieve Local Attribute File and Get ETag
-   ;; Compose request call
-   ;; Request to Server
-   ;; Write File & Open File
-   ))
+(defun abap-retrieve-source ()
+  "Retrieve source"
+  (interactive)
+  (abap-service-dispatch 'retrieve))
 
-(defun abap-service-dispatch (service object-property &optional success-callback)
-  " ABAP Service Dispatch
-    Paramters:
-      service: could be one of
-        - `search'
-        - `retrieve'
-        - `lock'
-        - `unlock'
-        - `check'
-        - `submit'
-        - `activate'
-      abap-object: could be string or alist of abap-object with key
-        - `type'
-        - `name'
-        - `source'
-      success-callback: callback function when service call finished with `success' status
-      args: could be used to put additional args for request call
-  "
-  (let ((major-type (intern (substring object-type 0 4)))
-        (service-function (case service
-                            ('search 'abaplib-service-do-search)
-                            ('lock   'abaplib-service-do-lock)
-                            ('unlock 'abaplib-service-do-unlock)
-                            ('retrieve 'abaplib-program-retrieve ))))
-    
-    (case major-type
-      ('PROG ))))
+(defun abap-check-source ()
+  "Check source"
+  (interactive)
+  (abap-service-dispatch 'check))
+
+(defun abap-submit-source ()
+  "Submit source"
+  (interactive)
+  (abap-service-dispatch 'submit))
+
+(defun abap-activate-source ()
+  "Activate source"
+  (interactive)
+  (abap-service-dispatch 'activate))
+
+
+
+(defun abap-init-local-env()
+  (let* ((file-name (file-name-nondirectory (buffer-file-name)))
+         (components  (split-string file-name "\\." t))
+         (object-name (car components))
+         (sub-type (car (cdr components))))))
 
 (provide 'abap)
 ;;; abap-in-emacs.el ends here
