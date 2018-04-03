@@ -573,9 +573,10 @@
                     url
                     :sync (not success-callback)
                     :headers headers
-                    :status-code '((304 . (lambda (&rest _) (message "304 Source Not Modified")))
-                                   (401 . (lambda (&rest _) (message "401 Not Authorized")))
-                                   (403 . (lambda (&rest _) (message "403 Forbidden"))))
+                    :status-code '(
+                                   ;; (304 . (lambda (&rest _) (message "304 Source Not Modified")))
+                                   (401 . (lambda (&rest _) (message "Got 401: Not Authorized")))
+                                   (403 . (lambda (&rest _) (message "Got 403: Forbidden"))))
                     :params params
                     :success success-callback
                     :error  (lambda (&key error-thrown &allow-other-keys &rest _)
