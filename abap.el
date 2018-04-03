@@ -100,7 +100,7 @@
     (message "Connecting...")
     (abaplib-auth-login-with-token project login-token client)))
 
-(defun abap-retrieve-object ()
+(defun abap-search-object ()
   "Retrieve ABAP objects"
   (interactive
    (let* ((project (abap-get-current-project))

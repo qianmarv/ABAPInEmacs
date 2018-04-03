@@ -1,0 +1,64 @@
+#+TITLE: ABAP Development in Emacs
+#+AUTHOR: qianmarv
+#+DATE: <2018-04-03 Tue>
+
+* Working Log
+** Draft / Rough Idea
+*** Project Management
+    Two ways of manage project
+    - Central - workspace: All projects hard/soft stored/connected with workspace
+      * Project <> Server!
+      * Customizing Variable
+      * Default directory while setup project
+      * A project directory (projects.xml)!
+    - Distributed: projects directoy can be put anywhere.
+    *Update*: put into a project.json which outside of current project to avoid
+    expose project directory information into source code repository.
+*** Version management
+    Involve git.
+    Introduce action like in below:
+    - abapgit pull 
+      1. *retrieve* source from server into local branch ~server~
+      2. merge back to local ~master~ branch.
+    - abapgit push 
+      1. *retrieve* source from server into local branch ~server~
+      2. merge local ~master~ branch to ~server~ and do *submit*
+      3. optionally with *Activate* action
+    - abapgit check
+      1. call *check* action
+** DONE Project Management
+   CLOSED: [2018-03-16 Fri 19:04]
+   - Setup Project
+   - Switch Between Project
+   - Project Bind with Server
+** DONE Feasibility check - PoC
+   CLOSED: [2018-04-03 Tue 09:40]
+   - [X] Authentication
+     - [X] open authentication
+     - [X] test cookie
+   - [X] Retrieve source
+     - [X] consider etag
+   - [X] Submit source to server
+     - [X] get CSRF token
+     - [X] Lock
+       - [X] stateful call
+     - [X] Unlock
+   - [X] Activate source
+
+** DONE Authentication
+   CLOSED: [2018-03-20 Tue 19:05]
+   - User Logon
+   - Save authentication credential
+** TODO Retrieve Source Object
+*** DONE Search From Server
+    CLOSED: [2018-03-26 Mon 19:07]
+*** DONE Retrieve Source For Object Type - Program (PROG)
+    CLOSED: [2018-03-26 Mon 19:08]
+*** TODO Retrieve Source For Object Type - Class (CLAS)
+*** TODO Retrieve Source For Object Type - CDS (DDLS/DCLS)
+** TODO Post Syntax Check to Server 
+*** DONE Pass CSRF Token Validation 
+    CLOSED: [2018-03-28 Wed 18:17]
+    With ~buffer-string~ somehow, it didn't work!
+    Nothing related with ~buffer-string~, but the content size.
+    How to solve => Change to https!
