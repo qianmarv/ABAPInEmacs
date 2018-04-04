@@ -53,8 +53,10 @@
 (defvar abaplib--sap-client-cache nil
   "ABAP system logon client")
 
+(defconst abaplib-core--not-a-type "ZZZZ")
+
 (defconst abaplib-core--supported-type
-  '(PROG CLAS DCLS DDLS)
+  '(PROG CLAS DCLS DDLS ZZZZ)
   "Supported ABAP Development Object Type")
 
 ;; (defvar abaplib--auth-data nil
@@ -429,25 +431,34 @@
   " ABAP Service Dispatch
     Paramters:
       service: could be one of
+        - `search'
         - `retrieve'
         - `check'
         - `submit'
         - `activate'
    There're specific implenmentation for each service need to be done."
-  (let* ((object-type (alist-get 'type))
-         (object-name (alist-get 'name))
-         (func-name (abaplib-core-get-service-func service object-type)))
-    (unless (fboundp func-name))
-    ))
+  (let* ((object-type (when (listp object)
+                        (alist-get object 'type)))
+         (service-function (abaplib-core-get-service-func service object-type)))
+    (apply service-function object)))
+
+(defun abaplib-core--compose-func-name (service impl-prefix)
+  (intern (concat "abaplib-"
+                  impl-prefix
+                  "-do-"
+                  (symbol-name service))))
 
 (defun abaplib-core-get-service-func (service object-type)
-  (let* ((type-as-service-prefix (case 'object-type
-                                  ('PROG "program")
-                                  ('CLAS "class")
-                                  ('DLCS "cds")))
-         (func (intern (concat "abaplib-" type-as-service-prefix "-do-" (symbol-name service)))))
-    (unless (fboundp func)
-     (intern (concat "abaplib-" "core" "-do-" (symbol-name service))))))
+  (let* ((impl-prefix (case (intern (substring object-type 0 4))
+                        ('PROG "program")
+                        ('CLAS "class")
+                        ('DLCS "cds")
+                        (t "core")))
+         (service-function (abaplib-core--compose-func-name service impl-prefix))
+         (fallback-function (abaplib-core--compose-func-name service "core")))
+         (if (fboundp service-function)
+             service-function
+           fallback-function)))
 
 
 (defun abaplib-service-get-uri (service &optional object-name)
@@ -600,303 +611,329 @@
                 (list (format "%-8s%-31s%s" type name description))))
             object-list)))
 
+(defun abaplib-core-do-retrieve(&optional dev-object)
+  "Retrieve source"
+  (let ((dev-object (or dev-object
+                        (abap-get-dev-obj-from-file))))
+    (abaplib-core-service-dispatch 'retrieve)))
+
+(defun abaplib-core-do-check(&optional dev-object)
+  "Check source"
+  (let ((dev-object (or dev-object
+                        (abap-get-dev-obj-from-file))))
+    (abaplib-core-service-dispatch 'check)))
+
+
+(defun abaplib-core-do-submit()
+  "Submit source"
+  (let ((dev-object (or dev-object
+                        (abap-get-dev-obj-from-file))))
+    (abaplib-core-service-dispatch 'submit)))
+
+(defun abap-activate-source ()
+  "Activate source"
+  (let ((dev-object (or dev-object
+                        (abap-get-dev-obj-from-file))))
+    (abaplib-core-service-dispatch 'activate)))
+
+
 ;;==============================================================================
 ;; Describe Object - Bufer/File Related
 ;;==============================================================================
 
 
-  (defun abaplib-object-describe()
-    (abaplib-ensure-inside-project)
-    (let* ((file-name (file-name-nondirectory (buffer-file-name)))
-           (components  (split-string file-name "\\." t))
-           (object-name (car components))          ; Object Name
-           (sub-type (car (cdr components)))       ; Sub Type  , prog/clas/ddls
-           (source-type (car (last components)))   ; Major Type, abap/cds
-           (property-file (format "%s%s.%s.xml"
-                                  abaplib--project-config-dir
-                                  object-name
-                                  sub-type)))
-      (setq abaplib--object-props (with-temp-buffer
-                                    (insert-file-contents property-file)
-                                    (let* ((xml-root (libxml-parse-xml-region (point-min) (point-max)))
-                                           (properties (xml-node-attributes xml-root)))
-                                      properties
-                                      )))
-      ))
+(defun abaplib-object-describe()
+  (abaplib-ensure-inside-project)
+  (let* ((file-name (file-name-nondirectory (buffer-file-name)))
+         (components  (split-string file-name "\\." t))
+         (object-name (car components))          ; Object Name
+         (sub-type (car (cdr components)))       ; Sub Type  , prog/clas/ddls
+         (source-type (car (last components)))   ; Major Type, abap/cds
+         (property-file (format "%s%s.%s.xml"
+                                abaplib--project-config-dir
+                                object-name
+                                sub-type)))
+    (setq abaplib--object-props (with-temp-buffer
+                                  (insert-file-contents property-file)
+                                  (let* ((xml-root (libxml-parse-xml-region (point-min) (point-max)))
+                                         (properties (xml-node-attributes xml-root)))
+                                    properties
+                                    )))
+    ))
 
-  (defun abaplib-object--get-property(property-name)
-    (unless abaplib--object-props
-      (abaplib-object-describe))
-    (cdr (assq property-name abaplib--object-props ))
+(defun abaplib-object--get-property(property-name)
+  (unless abaplib--object-props
+    (abaplib-object-describe))
+  (cdr (assq property-name abaplib--object-props ))
+  )
+
+(defun abaplib-object-get-name ()
+  (abaplib-object--get-property 'name))
+
+(defun abaplib-object-get-version()
+  (abaplib-object--get-property 'version))
+
+(defun abaplib-object-get-type()
+  (abaplib-object--get-property 'type))
+;; (let ((core-type (abaplib-object--get-property 'type)))
+;;   (cond ((string= core-type "PROG/P") "prog")
+;;         (t nil))))
+
+
+;;==============================================================================
+;; Service - Syntax Check
+;;==============================================================================
+
+(defun abaplib-core-check-syntax-template (adtcore-uri chkrun-uri version &optional chkrun-content)
+  "Return xml of checkObjects"
+  (concat
+   "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+   "<chkrun:checkObjectList xmlns:adtcore=\"http://www.sap.com/adt/core\" xmlns:chkrun=\"http://www.sap.com/adt/checkrun\">"
+   (format "<chkrun:checkObject adtcore:uri=\"%s\" chkrun:version=\"%s\">"
+           adtcore-uri
+           version)
+   (if chkrun-content
+       (concat
+        "<chkrun:artifacts>"
+        (format "<chkrun:artifact chkrun:contentType=\"text/plain; charset=utf-8\" chkrun:uri=\"%s\">"
+                chkrun-uri)
+        (format "<chkrun:content>%s</chkrun:content>"
+                chkrun-content)
+        "</chkrun:artifact>"
+        "</chkrun:artifacts>" )
+     ""
+     )
+   "</chkrun:checkObject>"
+   "</chkrun:checkObjectList>"
+   ))
+
+
+(defun abaplib-core-check-syntax ()
+  " Check syntax for source code in current buffer"
+  (interactive)
+  (message "Syntax check...")
+  (let ((object-name (abaplib-object-get-name))
+        (object-type (abaplib-object-get-type))
+        (object-version (abaplib-object-get-version))
+        (object-source (buffer-substring-no-properties (point-min) (point-max))))
+    (cond ((string= object-type "PROG/P") (abaplib-core-check-prog
+                                           object-name
+                                           object-source
+                                           object-version
+                                           ))
+          (t nil))
     )
-
-  (defun abaplib-object-get-name ()
-    (abaplib-object--get-property 'name))
-
-  (defun abaplib-object-get-version()
-    (abaplib-object--get-property 'version))
-
-  (defun abaplib-object-get-type()
-    (abaplib-object--get-property 'type))
-  ;; (let ((core-type (abaplib-object--get-property 'type)))
-  ;;   (cond ((string= core-type "PROG/P") "prog")
-  ;;         (t nil))))
+  )
 
 
-  ;;==============================================================================
-  ;; Service - Syntax Check
-  ;;==============================================================================
+(defun abaplib-core-check-render-type-text(type)
+  (cond ((string= type "E") (propertize "Error"       'face '(bold (:foreground "red"))))
+        ((string= type "W") (propertize "Warning"     'face '(bold (:foreground "orange"))))
+        ((string= type "I") (propertize "Information" 'face '(bold (:foreground "green"))))
+        (t "Other"))
+  )
 
-  (defun abaplib-core-check-syntax-template (adtcore-uri chkrun-uri version &optional chkrun-content)
-    "Return xml of checkObjects"
-    (concat
-     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-     "<chkrun:checkObjectList xmlns:adtcore=\"http://www.sap.com/adt/core\" xmlns:chkrun=\"http://www.sap.com/adt/checkrun\">"
-     (format "<chkrun:checkObject adtcore:uri=\"%s\" chkrun:version=\"%s\">"
-             adtcore-uri
-             version)
-     (if chkrun-content
-         (concat
-          "<chkrun:artifacts>"
-          (format "<chkrun:artifact chkrun:contentType=\"text/plain; charset=utf-8\" chkrun:uri=\"%s\">"
-                  chkrun-uri)
-          (format "<chkrun:content>%s</chkrun:content>"
-                  chkrun-content)
-          "</chkrun:artifact>"
-          "</chkrun:artifacts>" )
-       ""
-       )
-     "</chkrun:checkObject>"
-     "</chkrun:checkObjectList>"
-     ))
+(defun abaplib-core-check-render-pos(position &optional target-buffer)
+  (let* ((target-buffer (or target-buffer (current-buffer)))
+         (pos-list (split-string position ","))
+         (line (string-to-number (car pos-list)))
+         (column (string-to-number (car (cdr pos-list))))
+         (map (make-sparse-keymap))
+         (fn-follow-pos `(lambda ()
+                           (interactive)
+                           (pop-to-buffer ,target-buffer)
+                           (abaplib-util-goto-position ,line ,column))
+                        ))
+    (define-key map (kbd "<down-mouse-1>") fn-follow-pos)
+    (define-key map (kbd "<RET>") fn-follow-pos)
+    (propertize position
+                'face 'underline
+                'mouse-face 'highlight
+                'keymap map)))
+
+(defun abaplib-core-check-show-message (messages)
+  (let ((severity-level "I")
+        (output-log))
+    (dolist (message messages severity-level output-log)
+      (let* ((uri (xml-get-attribute message 'uri))
+             (type (xml-get-attribute message 'type))
+             (text (xml-get-attribute message 'shortText))
+             (position (progn
+                         (string-match "#start=\\([0-9]+,[0-9]+\\)" uri)
+                         (match-string 1 uri))))
+
+        (if (or (and (string= type "W") (string= severity-level "I"))
+                (and (string= type "E") (or (string= severity-level "W")
+                                            (string= severity-level "I"))))
+            (setq severity-level type))
+
+        (setq output-log
+              (concat output-log "\n"
+                      (concat (format "[%s] " (abaplib-core-check-render-type-text type))
+                              (format "at position (%s): "
+                                      (abaplib-core-check-render-pos position))
+                              text)))
+        ))
+
+    (if output-log
+        (abaplib-util-log-buf-write output-log))
+
+    (cond ((string= severity-level "I")
+           (message "Syntax check completed with `success' result."))
+          ((string= severity-level "W")
+           (message "Syntax check completed with `warning' messages."))
+          ((string= severity-level "E")
+           (progn
+             (message "Syntax check completed with `error' messages.")
+             (abaplib-util-log-buf-pop))))
+    ))
 
 
-  (defun abaplib-core-check-syntax ()
-    " Check syntax for source code in current buffer"
-    (interactive)
-    (message "Syntax check...")
-    (let ((object-name (abaplib-object-get-name))
-          (object-type (abaplib-object-get-type))
-          (object-version (abaplib-object-get-version))
-          (object-source (buffer-substring-no-properties (point-min) (point-max))))
-      (cond ((string= object-type "PROG/P") (abaplib-core-check-prog
-                                             object-name
-                                             object-source
-                                             object-version
-                                             ))
-            (t nil))
+;;========================================================================
+;; Service - Lock & Unlock
+;;========================================================================
+
+(defun abaplib-core-lock()
+  ;; (interactive)  ;;  "Testing phase"
+  ;; Should be invoked in sync way
+  ;; (setq abaplib--lock-handle nil)
+  (let* ((prog-name (abaplib-object-get-name))
+         (root-node (abap--rest-call
+                     (abaplib-service-get-uri 'lock prog-name)
+                     nil
+                     :parser 'abaplib-util-xml-parser
+                     :type "POST"
+                     :headers `(("X-sap-adt-sessiontype" . "stateful"))
+                     ))
+         (node-name (xml-node-name root-node)))
+    (if (string= node-name "abap")
+        ;; (setq abaplib--lock-handle
+        ((lambda (abap-node) ;; Get lock handle
+           (car (last
+                 (car (xml-get-children
+                       (car (xml-get-children
+                             (car (xml-get-children abap-node 'values))
+                             'DATA))
+                       'LOCK_HANDLE))))) root-node)
+      ;; )
+      ;; Request lock failed
+      (let ((error-message
+             ((lambda (exception-node)
+                (car (last
+                      (car (xml-get-children exception-node 'localizedMessage)))))
+              root-node)))
+        (error  error-message))
       )
-    )
+    ))
 
+;; (defun abaplib-core-lock-get-handle()
+;;   (unless abaplib--lock-handle
+;;     (abaplib-core-lock))
+;;   abaplib--lock-handle
+;;   )
 
-  (defun abaplib-core-check-render-type-text(type)
-    (cond ((string= type "E") (propertize "Error"       'face '(bold (:foreground "red"))))
-          ((string= type "W") (propertize "Warning"     'face '(bold (:foreground "orange"))))
-          ((string= type "I") (propertize "Information" 'face '(bold (:foreground "green"))))
-          (t "Other"))
-    )
+(defun abaplib-core-unlock (lock-handle)
+  (let ((prog-name (abaplib-object-get-name)))
+    (abap--rest-call
+     (abaplib-service-get-uri 'unlock prog-name)
+     (lambda (&rest response)
+       (message "Unlocked."))
+     :type "POST"
+     :headers `(("X-sap-adt-sessiontype" . "stateless"))
+     :params `(("lockHandle" . ,lock-handle))
+     )))
 
-  (defun abaplib-core-check-render-pos(position &optional target-buffer)
-    (let* ((target-buffer (or target-buffer (current-buffer)))
-           (pos-list (split-string position ","))
-           (line (string-to-number (car pos-list)))
-           (column (string-to-number (car (cdr pos-list))))
-           (map (make-sparse-keymap))
-           (fn-follow-pos `(lambda ()
-                             (interactive)
-                             (pop-to-buffer ,target-buffer)
-                             (abaplib-util-goto-position ,line ,column))
-                          ))
-      (define-key map (kbd "<down-mouse-1>") fn-follow-pos)
-      (define-key map (kbd "<RET>") fn-follow-pos)
-      (propertize position
-                  'face 'underline
-                  'mouse-face 'highlight
-                  'keymap map)))
+;;========================================================================
+;; Service - Push Source
+;;========================================================================
 
-  (defun abaplib-core-check-show-message (messages)
-    (let ((severity-level "I")
-          (output-log))
-      (dolist (message messages severity-level output-log)
-        (let* ((uri (xml-get-attribute message 'uri))
-               (type (xml-get-attribute message 'type))
-               (text (xml-get-attribute message 'shortText))
-               (position (progn
-                           (string-match "#start=\\([0-9]+,[0-9]+\\)" uri)
-                           (match-string 1 uri))))
+(defun abaplib-core-push-prog ()
+  (interactive)
+  (let ((prog-name   (abaplib-object-get-name))
+        (prog-source (buffer-substring-no-properties (point-min) (point-max)))
+        (lock-handle (abaplib-core-lock)))
+    (abap--rest-call
+     (abaplib-service-get-uri 'save-program-source prog-name)
+     (lambda (&rest rest)
+       (let* ((response (cl-getf rest :response))
+              (ETag (request-response-header response "ETag")))
+         (message (format "Succeed with ETAG:%s" ETag))
+         (abaplib-core-unlock lock-handle)))
+     :type "PUT"
+     :data prog-source
+     :headers `(("Content-Type" . "text/plain"))
+     :params `(("lockHandle" . ,lock-handle))
+     )))
 
-          (if (or (and (string= type "W") (string= severity-level "I"))
-                  (and (string= type "E") (or (string= severity-level "W")
-                                              (string= severity-level "I"))))
-              (setq severity-level type))
+;;========================================================================
+;; Service - Push Source
+;;========================================================================
+(defun abaplib-core-activate-template (adtcore-name adtcore-uri)
+  "Return xml of checkObjects"
+  (concat
+   "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+   "<adtcore:objectReferences xmlns:adtcore=\"http://www.sap.com/adt/core\">"
+   (format "<adtcore:objectReference adtcore:name=\"%s\" adtcore:uri=\"%s\"/>"
+           adtcore-name
+           adtcore-uri)
+   "</adtcore:objectReferences>"
+   ))
 
-          (setq output-log
-                (concat output-log "\n"
-                        (concat (format "[%s] " (abaplib-core-check-render-type-text type))
-                                (format "at position (%s): "
-                                        (abaplib-core-check-render-pos position))
-                                text)))
-          ))
+(defun abaplib-core-activate-show-message (messages)
+  (let ((severity-level "I")
+        (output-log))
+    (dolist (message messages severity-level output-log)
+      (let* ((uri (xml-get-attribute message 'href))
+             (type (xml-get-attribute message 'type))
+             (text (car (last (car (xml-get-children
+                                    (car (xml-get-children message 'shortText))
+                                    'txt)))))
+             (position (progn
+                         (string-match "#start=\\([0-9]+,[0-9]+\\)" uri)
+                         (match-string 1 uri))))
+        (if (or (and (string= type "W") (string= severity-level "I"))
+                (and (string= type "E") (or (string= severity-level "W")
+                                            (string= severity-level "I"))))
+            (setq severity-level type))
 
-      (if output-log
-          (abaplib-util-log-buf-write output-log))
+        (setq output-log
+              (concat output-log "\n"
+                      (concat (format "[%s] " (abaplib-core-check-render-type-text type))
+                              (format "at position (%s): "
+                                      (abaplib-core-check-render-pos position))
+                              text)))
+        ))
 
-      (cond ((string= severity-level "I")
-             (message "Syntax check completed with `success' result."))
-            ((string= severity-level "W")
-             (message "Syntax check completed with `warning' messages."))
-            ((string= severity-level "E")
-             (progn
-               (message "Syntax check completed with `error' messages.")
-               (abaplib-util-log-buf-pop))))
-      ))
+    (if output-log
+        (abaplib-util-log-buf-write output-log))
 
+    (cond ((string= severity-level "I")
+           (message "Activation successful"))
+          ((string= severity-level "W")
+           (message "Activation successful with `warnings'"))
+          ((string= severity-level "E")
+           (progn
+             (message "Activation failed with `errors'")
+             (abaplib-util-log-buf-pop))))
+    ))
 
-  ;;========================================================================
-  ;; Service - Lock & Unlock
-  ;;========================================================================
-
-  (defun abaplib-core-lock()
-    ;; (interactive)  ;;  "Testing phase"
-    ;; Should be invoked in sync way
-    ;; (setq abaplib--lock-handle nil)
-    (let* ((prog-name (abaplib-object-get-name))
-           (root-node (abap--rest-call
-                       (abaplib-service-get-uri 'lock prog-name)
-                       nil
-                       :parser 'abaplib-util-xml-parser
-                       :type "POST"
-                       :headers `(("X-sap-adt-sessiontype" . "stateful"))
-                       ))
-           (node-name (xml-node-name root-node)))
-      (if (string= node-name "abap")
-          ;; (setq abaplib--lock-handle
-          ((lambda (abap-node) ;; Get lock handle
-             (car (last
-                   (car (xml-get-children
-                         (car (xml-get-children
-                               (car (xml-get-children abap-node 'values))
-                               'DATA))
-                         'LOCK_HANDLE))))) root-node)
-        ;; )
-        ;; Request lock failed
-        (let ((error-message
-               ((lambda (exception-node)
-                  (car (last
-                        (car (xml-get-children exception-node 'localizedMessage)))))
-                root-node)))
-          (error  error-message))
-        )
-      ))
-
-  ;; (defun abaplib-core-lock-get-handle()
-  ;;   (unless abaplib--lock-handle
-  ;;     (abaplib-core-lock))
-  ;;   abaplib--lock-handle
-  ;;   )
-
-  (defun abaplib-core-unlock (lock-handle)
-    (let ((prog-name (abaplib-object-get-name)))
-      (abap--rest-call
-       (abaplib-service-get-uri 'unlock prog-name)
-       (lambda (&rest response)
-         (message "Unlocked."))
-       :type "POST"
-       :headers `(("X-sap-adt-sessiontype" . "stateless"))
-       :params `(("lockHandle" . ,lock-handle))
-       )))
-
-  ;;========================================================================
-  ;; Service - Push Source
-  ;;========================================================================
-
-  (defun abaplib-core-push-prog ()
-    (interactive)
-    (let ((prog-name   (abaplib-object-get-name))
-          (prog-source (buffer-substring-no-properties (point-min) (point-max)))
-          (lock-handle (abaplib-core-lock)))
-      (abap--rest-call
-       (abaplib-service-get-uri 'save-program-source prog-name)
-       (lambda (&rest rest)
-         (let* ((response (cl-getf rest :response))
-                (ETag (request-response-header response "ETag")))
-           (message (format "Succeed with ETAG:%s" ETag))
-           (abaplib-core-unlock lock-handle)))
-       :type "PUT"
-       :data prog-source
-       :headers `(("Content-Type" . "text/plain"))
-       :params `(("lockHandle" . ,lock-handle))
-       )))
-
-  ;;========================================================================
-  ;; Service - Push Source
-  ;;========================================================================
-  (defun abaplib-core-activate-template (adtcore-name adtcore-uri)
-    "Return xml of checkObjects"
-    (concat
-     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-     "<adtcore:objectReferences xmlns:adtcore=\"http://www.sap.com/adt/core\">"
-     (format "<adtcore:objectReference adtcore:name=\"%s\" adtcore:uri=\"%s\"/>"
-             adtcore-name
-             adtcore-uri)
-     "</adtcore:objectReferences>"
+(defun abaplib-core-activate-prog ()
+  (interactive)
+  (let* ((prog-name   (abaplib-object-get-name))
+         (adtcore-name (upcase prog-name))
+         (adtcore-uri (concat "/sap/bc/adt/programs/programs/" prog-name))
+         (post-xml (abaplib-core-activate-template adtcore-name adtcore-uri)))
+    (abap--rest-call
+     (abaplib-service-get-uri 'activate)
+     (lambda (&rest rest)
+       (let* ((messages (xml-get-children (cl-getf rest :data) 'msg)))
+         (abaplib-core-activate-show-message messages)
+         ))
+     :parser 'abaplib-util-xml-parser
+     :type "POST"
+     :data post-xml
      ))
+  )
 
-  (defun abaplib-core-activate-show-message (messages)
-    (let ((severity-level "I")
-          (output-log))
-      (dolist (message messages severity-level output-log)
-        (let* ((uri (xml-get-attribute message 'href))
-               (type (xml-get-attribute message 'type))
-               (text (car (last (car (xml-get-children
-                                      (car (xml-get-children message 'shortText))
-                                      'txt)))))
-               (position (progn
-                           (string-match "#start=\\([0-9]+,[0-9]+\\)" uri)
-                           (match-string 1 uri))))
-          (if (or (and (string= type "W") (string= severity-level "I"))
-                  (and (string= type "E") (or (string= severity-level "W")
-                                              (string= severity-level "I"))))
-              (setq severity-level type))
-
-          (setq output-log
-                (concat output-log "\n"
-                        (concat (format "[%s] " (abaplib-core-check-render-type-text type))
-                                (format "at position (%s): "
-                                        (abaplib-core-check-render-pos position))
-                                text)))
-          ))
-
-      (if output-log
-          (abaplib-util-log-buf-write output-log))
-
-      (cond ((string= severity-level "I")
-             (message "Activation successful"))
-            ((string= severity-level "W")
-             (message "Activation successful with `warnings'"))
-            ((string= severity-level "E")
-             (progn
-               (message "Activation failed with `errors'")
-               (abaplib-util-log-buf-pop))))
-      ))
-
-  (defun abaplib-core-activate-prog ()
-    (interactive)
-    (let* ((prog-name   (abaplib-object-get-name))
-           (adtcore-name (upcase prog-name))
-           (adtcore-uri (concat "/sap/bc/adt/programs/programs/" prog-name))
-           (post-xml (abaplib-core-activate-template adtcore-name adtcore-uri)))
-      (abap--rest-call
-       (abaplib-service-get-uri 'activate)
-       (lambda (&rest rest)
-         (let* ((messages (xml-get-children (cl-getf rest :data) 'msg)))
-           (abaplib-core-activate-show-message messages)
-           ))
-       :parser 'abaplib-util-xml-parser
-       :type "POST"
-       :data post-xml
-       ))
-    )
-
-  (provide 'abaplib-core)
+(provide 'abaplib-core)
 ;;; abaplib.el ends here

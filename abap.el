@@ -89,11 +89,15 @@
   (interactive
    (let* ((project (abap-get-current-project))
           (query-string (read-string "Enter Search String: "))
-          (object-list (abaplib-core-do-search query-string))
-          (selected-object (split-string (completing-read "Maching Items: "
-                                                          object-list) " " t))
-          (object-type (car selected-object))
-          (object-name (car (cdr selected-object))))
+          (search-result))
+     (setq search-result ((abaplib-core-service-dispatch
+                           'retrieve
+                           `((objet-name . ,query-string)
+                             (object-type . ,abaplib-core--not-a-type)))))
+     (let* ((selected-object (split-string (completing-read "Maching Items: "
+                                                            search-result) " " t))
+            (object-type (car selected-object))
+            (object-name (car (cdr selected-object)))))
      (abap-retrieve-source (list `(name . ,object-name)
                                  `(type . ,object-type))))))
 
