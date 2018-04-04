@@ -425,32 +425,30 @@
 ;;==============================================================================
 ;; Core Services
 ;;==============================================================================
-(defun abaplib-service-call (service abap-object &optional success-callback)
-  " ABAP Service Call
+(defun abaplib-core-service-dispatch (service object)
+  " ABAP Service Dispatch
     Paramters:
       service: could be one of
-        - `search'
         - `retrieve'
-        - `lock'
-        - `unlock'
         - `check'
         - `submit'
         - `activate'
-      abap-object: could be string or alist of abap-object with key
-        - `type'
-        - `name'
-        - `source'
-      success-callback: callback function when service call finished with `success' status
-      args: could be used to put additional args for request call
-  "
-  (case service
-    ('search (abaplib-service-do-search abap-object))
-    ('retrieve )
-    ('lock )
-    ('unlock )
-    ('check )
-    ('submit )
-    ('activate)))
+   There're specific implenmentation for each service need to be done."
+  (let* ((object-type (alist-get 'type))
+         (object-name (alist-get 'name))
+         (func-name (abaplib-core-get-service-func service object-type)))
+    (unless (fboundp func-name))
+    ))
+
+(defun abaplib-core-get-service-func (service object-type)
+  (let* ((type-as-service-prefix (case 'object-type
+                                  ('PROG "program")
+                                  ('CLAS "class")
+                                  ('DLCS "cds")))
+         (func (intern (concat "abaplib-" type-as-service-prefix "-do-" (symbol-name service)))))
+    (unless (fboundp func)
+     (intern (concat "abaplib-" "core" "-do-" (symbol-name service))))))
+
 
 (defun abaplib-service-get-uri (service &optional object-name)
   (cond
@@ -581,7 +579,7 @@
 ;; Services Implementation - Search ABAP Object
 ;;==============================================================================
 
-(defun abaplib-service-do-search (query-string)
+(defun abaplib-core-do-search (query-string)
   "Search ABAP objects in server in synchronouse call"
   (let* ((url (abaplib-get-project-api-url "/sap/bc/adt/repository/informationsystem/search"))
          (params `((operation . "quickSearch")
@@ -605,20 +603,7 @@
 ;;==============================================================================
 ;; Describe Object - Bufer/File Related
 ;;==============================================================================
-(defun abaplib-core-service-dispatch (service object)
-  " ABAP Service Dispatch
-    Paramters:
-      service: could be one of
-        - `search'
-        - `retrieve'
-        - `check'
-        - `submit'
-        - `activate'
-        - `lock'
-        - `unlock'
-   There're specific implenmentation for each service need to be done."
 
-  ())
 
   (defun abaplib-object-describe()
     (abaplib-ensure-inside-project)

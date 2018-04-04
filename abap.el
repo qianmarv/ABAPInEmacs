@@ -88,12 +88,10 @@
   "Retrieve ABAP objects"
   (interactive
    (let* ((project (abap-get-current-project))
-          (object-name (read-string "Enter Search String: "))
-          (object-list (abaplib-service-call 'search object-name))
-          (selected-object (split-string
-                            (completing-read "Maching Items: " object-list)
-                            " "
-                            t))
+          (query-string (read-string "Enter Search String: "))
+          (object-list (abaplib-core-do-search query-string))
+          (selected-object (split-string (completing-read "Maching Items: "
+                                                          object-list) " " t))
           (object-type (car selected-object))
           (object-name (car (cdr selected-object))))
      (abap-retrieve-source (list `(name . ,object-name)
