@@ -24,9 +24,6 @@
 
 ;;; Code:
 
-;;==============================================================================
-;; Utilities
-;;==============================================================================
 (defun abaplib-util-current-dir ()
   (if buffer-file-name
       (file-name-directory buffer-file-name)

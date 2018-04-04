@@ -13,7 +13,7 @@
 (require 'abaplib-program)
 
 
-;; (defvar-local abap--dev-object nil
+;; (defvar-local abap--abap-object nil
 ;; "ABAP development Object
 ;; alist with name and type")
 ;;==============================================================================
@@ -90,54 +90,58 @@
    (let* ((project (abap-get-current-project))
           (query-string (read-string "Enter Search String: "))
           (search-result))
-     (setq search-result ((abaplib-core-service-dispatch
-                           'retrieve
-                           `((objet-name . ,query-string)
-                             (object-type . ,abaplib-core--not-a-type)))))
+     (setq search-result (abaplib-core-service-dispatch
+                           'search
+                           `((name . ,query-string)
+                             (type . ,abaplib-core--not-a-type))))
      (let* ((selected-object (split-string (completing-read "Maching Items: "
                                                             search-result) " " t))
             (object-type (car selected-object))
-            (object-name (car (cdr selected-object)))))
-     (abap-retrieve-source (list `(name . ,object-name)
-                                 `(type . ,object-type))))))
+            (object-name (car (cdr selected-object))))
+       (abap-retrieve-source (list `(name . ,object-name)
+                                   `(type . ,object-type)))))))
 
-(defun abap-retrieve-source (&optional dev-object)
+(defun abap-retrieve-source (&optional abap-object)
   "Retrieve source"
   (interactive)
-  (let ((dev-object (or dev-object
-                        (abap-get-dev-obj-from-file))))
-    (abaplib-core-service-dispatch 'retrieve)))
+  (let ((abap-object (or abap-object
+                        (abap-get-abap-object-from-file))))
+    (abaplib-core-service-dispatch 'retrieve abap-object)
+    (let ((source-file (abaplib-program--get-source-file (alist-get 'name abap-object))))
+      (unless (string= (buffer-file-name) source-file)
+        (switch-to-buffer (find-file source-file))))
+      ))
 
-(defun abap-check-source (&optional dev-object)
+(defun abap-check-source (&optional abap-object)
   "Check source"
   (interactive)
-  (let ((dev-object (or dev-object
-                        (abap-get-dev-obj-from-file))))
+  (let ((abap-object (or abap-object
+                        (abap-get-abap-object-from-file))))
     (abaplib-core-service-dispatch 'check)))
 
 
 (defun abap-submit-source ()
   "Submit source"
   (interactive)
-  (let ((dev-object (or dev-object
-                        (abap-get-dev-obj-from-file))))
+  (let ((abap-object (or abap-object
+                        (abap-get-abap-object-from-file))))
     (abaplib-core-service-dispatch 'submit)))
 
 (defun abap-activate-source ()
   "Activate source"
   (interactive)
-  (let ((dev-object (or dev-object
-                        (abap-get-dev-obj-from-file))))
+  (let ((abap-object (or abap-object
+                        (abap-get-abap-object-from-file))))
     (abaplib-core-service-dispatch 'activate)))
 
 
-(defun abap-get-dev-obj-from-file()
+(defun abap-get-abap-object-from-file()
   (let* ((file-name (file-name-nondirectory (buffer-file-name)))
          (components  (reverse (split-string file-name "\\." t)))
          (object-name (car (last components)))
          (object-type (upcase (nth 1 components))))
-    (unless (find object-type abaplib-core--supported-type)
-      (error "Object type %s not support." object-type))
+    (unless (find (intern object-type) abaplib-core--supported-type)
+      (error "Not in an valid abap development object."))
     `((name . ,object-name)
       (type . ,object-type))))
 

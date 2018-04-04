@@ -30,7 +30,11 @@
 
 ;; (eval-when-compile (require 'cl))
 (require 'request)
+(require 'abaplib-util)
 
+
+;; (defgroup abap nil
+;;   "ABAP development environment in Emacs.")
 
 (defcustom abap-workspace-dir "~/ws-abap/"
   "ABAP workspace directory"
@@ -47,6 +51,10 @@
   :type 'number
   :group 'abap)
 
+(defvar abap-log-level nil
+  "Logging level for abap
+   One of value `debug'")
+
 (defvar abaplib--login-token-cache nil
   "ABAP token used for authentication.")
 
@@ -55,8 +63,7 @@
 
 (defconst abaplib-core--not-a-type "ZZZZ")
 
-(defconst abaplib-core--supported-type
-  '(PROG CLAS DCLS DDLS ZZZZ)
+(defconst abaplib-core--supported-type  '(PROG CLAS DCLS DDLS ZZZZ)
   "Supported ABAP Development Object Type")
 
 ;; (defvar abaplib--auth-data nil
@@ -100,6 +107,9 @@
 
 (defconst abaplib--log-buffer "*ABAP Log*"
   "ABAP log buffer")
+
+(defconst abaplib-core--root-uri "/sap/bc/adt"
+  "root uri of restful API")
 ;;==============================================================================
 ;; Project
 ;;==============================================================================
@@ -198,12 +208,12 @@
     (abaplib-save-workspace-descriptor new-descriptor)
     (setq abaplib--current-project nil)))
 
-(defun abaplib-get-project-api-url (api)
+(defun abaplib-get-project-api-url (uri)
   "Compose full API url"
-  (if (string-match "^http[s]*://" api) api
+  (if (string-match "^http[s]*://" uri) uri
     (concat (replace-regexp-in-string "/*$" "/"
                                       (abaplib-project-get-property 'server))
-            (replace-regexp-in-string "^/*" "" api))))
+            (replace-regexp-in-string "^/*" "" uri))))
 
 (defun abaplib-get-project-cache-dir ()
   "Get project cache directory"
@@ -217,7 +227,6 @@
 ;;==============================================================================
 ;; Authentication
 ;;==============================================================================
-
 
 (defun abaplib-add-server-to-project (project server)
   (abaplib-project-set-property project (cons 'server server)))
@@ -427,7 +436,7 @@
 ;;==============================================================================
 ;; Core Services
 ;;==============================================================================
-(defun abaplib-core-service-dispatch (service object)
+(defun abaplib-core-service-dispatch (service abap-object)
   " ABAP Service Dispatch
     Paramters:
       service: could be one of
@@ -437,16 +446,16 @@
         - `submit'
         - `activate'
    There're specific implenmentation for each service need to be done."
-  (let* ((object-type (when (listp object)
-                        (alist-get object 'type)))
+  (let* ((object-type (when (listp abap-object)
+                        (alist-get 'type abap-object)))
          (service-function (abaplib-core-get-service-func service object-type)))
-    (apply service-function object)))
+    (apply service-function (list abap-object))))
 
 (defun abaplib-core--compose-func-name (service impl-prefix)
-  (intern (concat "abaplib-"
-                  impl-prefix
-                  "-do-"
-                  (symbol-name service))))
+  (concat "abaplib-"
+          impl-prefix
+          "-do-"
+          (symbol-name service)))
 
 (defun abaplib-core-get-service-func (service object-type)
   (let* ((impl-prefix (case (intern (substring object-type 0 4))
@@ -454,11 +463,12 @@
                         ('CLAS "class")
                         ('DLCS "cds")
                         (t "core")))
-         (service-function (abaplib-core--compose-func-name service impl-prefix))
-         (fallback-function (abaplib-core--compose-func-name service "core")))
-         (if (fboundp service-function)
-             service-function
-           fallback-function)))
+         (service-function (intern (abaplib-core--compose-func-name service impl-prefix)))
+         (fallback-function (intern (abaplib-core--compose-func-name service "core"))))
+    ;; (message service-function)
+    (if (fboundp service-function)
+        service-function
+      fallback-function)))
 
 
 (defun abaplib-service-get-uri (service &optional object-name)
@@ -590,9 +600,10 @@
 ;; Services Implementation - Search ABAP Object
 ;;==============================================================================
 
-(defun abaplib-core-do-search (query-string)
+(defun abaplib-core-do-search (dev-object)
   "Search ABAP objects in server in synchronouse call"
-  (let* ((url (abaplib-get-project-api-url "/sap/bc/adt/repository/informationsystem/search"))
+  (let* ((query-string (alist-get 'name dev-object))
+         (url (abaplib-get-project-api-url "/sap/bc/adt/repository/informationsystem/search"))
          (params `((operation . "quickSearch")
                    (query . ,(concat "*" query-string "*"))
                    (maxResult . ,abap-search-list-max-result)))
