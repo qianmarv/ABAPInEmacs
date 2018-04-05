@@ -112,33 +112,6 @@
 
 
 
-
-(defun abaplib-program-check-syntax (prog-name source &optional version )
-  "Check ABAP program syntax based on local unsubmitted source"
-  (let* ((version (or version "active"))
-         (adtcore-uri (concat "/sap/bc/adt/programs/programs/" prog-name))
-         (chkrun-uri  (concat adtcore-uri "/source/main"))
-         (chkrun-content (base64-encode-string source))
-         (post-data (abaplib-core-check-syntax-template
-                     adtcore-uri
-                     chkrun-uri version chkrun-content)))
-    ;; before post
-    ;; (message post-data)
-    (abaplib-service-call
-     (abaplib-service-get-uri 'checkrun)
-     (lambda (&rest rest)
-       (let* ((check-report (xml-get-children (cl-getf rest :data) 'checkReport))
-              (message-list (xml-get-children (car check-report) 'checkMessageList))
-              (messages (xml-get-children (car message-list) 'checkMessage)))
-         (abaplib-core-check-show-message messages)
-         ))
-     :parser 'abaplib-util-xml-parser
-     :type "POST"
-     :data post-data
-     :headers `(("Content-Type" . "application/vnd.sap.adt.checkobjects+xml"))
-     )
-    ))
-
 (defun abaplib-program-submit()
   (let ((prog-name   (abaplib-object-get-name))
         (prog-source (buffer-substring-no-properties (point-min) (point-max)))
@@ -210,21 +183,34 @@
      :headers (list `("If-None-Match" . ,etag)
                     '("Content-Type" . "plain/text")))))
 
-(defun abaplib-program-do-retrieve(&optional dev-object)
-  ;; Retrieve metadata
-  (message "function: abaplib-program-do-retrieve called with parameters: %s" dev-object)
+(defun abaplib-program-do-retrieve(dev-object)
+  "Retrieve metadata"
+  (abaplib-program--parse-program-object dev-object)
+  (let ((source-etag (abaplib-program--get-property 'etag))
+        (metadata-etag (abaplib-program--get-property 'metadata-etag)))
+    (abaplib-program--retrieve-properties metadata-etag)
+    (abaplib-program--retrieve-source source-etag)))
+
+(defun abaplib-program-do-check(dev-object)
+  "Check syntax for program source "
+  (message "function: abaplib-program-do-check called with parameters: %s" dev-object)
+  (let* ((version (or version "active"))
+         (adtcore-uri (concat "/sap/bc/adt/programs/programs/" prog-name))
+         (chkrun-uri  (concat adtcore-uri "/source/main"))
+         (chkrun-content (base64-encode-string source))
+         (post-data (abaplib-core-check-syntax-template
+                     adtcore-uri
+                     chkrun-uri version chkrun-content)))
+    ;; before post
+    ;; (message post-data)
+    ))
+
+(defun abaplib-program--parse-program-object (dev-object)
   (let ((program-name (or (alist-get 'name dev-object)
                           abaplib-program--name))
-        (subtype (car (last (split-string (alist-get 'type dev-object)
-                                          "/")))))
+        (subtype (car (last (split-string (alist-get 'type dev-object) "/")))))
     (setq abaplib-program--name program-name)
-    (setq abaplib-program--subtype subtype)
-
-    (let ((source-etag (abaplib-program--get-property 'etag))
-          (metadata-etag (abaplib-program--get-property 'metadata-etag)))
-      (abaplib-program--retrieve-properties metadata-etag)
-      (abaplib-program--retrieve-source source-etag))))
-
+    (setq abaplib-program--subtype subtype)))
 
 (provide 'abaplib-program)
 ;;; abaplib_programs.el ends here

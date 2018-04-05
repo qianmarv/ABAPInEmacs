@@ -99,25 +99,24 @@
             (object-type (car selected-object))
             (object-name (car (cdr selected-object))))
        (abap-retrieve-source (list `(name . ,object-name)
-                                   `(type . ,object-type)))))))
+                                   `(type . ,object-type)))
+       (let ((source-file (abaplib-program--get-source-file (alist-get 'name abap-object))))
+         (unless (string= (buffer-file-name) source-file)
+           (switch-to-buffer (find-file source-file))))))))
 
 (defun abap-retrieve-source (&optional abap-object)
   "Retrieve source"
   (interactive)
   (let ((abap-object (or abap-object
                         (abap-get-abap-object-from-file))))
-    (abaplib-core-service-dispatch 'retrieve abap-object)
-    (let ((source-file (abaplib-program--get-source-file (alist-get 'name abap-object))))
-      (unless (string= (buffer-file-name) source-file)
-        (switch-to-buffer (find-file source-file))))
-      ))
+    (abaplib-core-service-dispatch 'retrieve abap-object)))
 
 (defun abap-check-source (&optional abap-object)
   "Check source"
   (interactive)
   (let ((abap-object (or abap-object
                         (abap-get-abap-object-from-file))))
-    (abaplib-core-service-dispatch 'check)))
+    (abaplib-core-service-dispatch 'check abap-object)))
 
 
 (defun abap-submit-source ()
@@ -125,14 +124,14 @@
   (interactive)
   (let ((abap-object (or abap-object
                         (abap-get-abap-object-from-file))))
-    (abaplib-core-service-dispatch 'submit)))
+    (abaplib-core-service-dispatch 'submit abap-object)))
 
 (defun abap-activate-source ()
   "Activate source"
   (interactive)
   (let ((abap-object (or abap-object
                         (abap-get-abap-object-from-file))))
-    (abaplib-core-service-dispatch 'activate)))
+    (abaplib-core-service-dispatch 'activate abap-object)))
 
 
 (defun abap-get-abap-object-from-file()
@@ -141,7 +140,7 @@
          (object-name (car (last components)))
          (object-type (upcase (nth 1 components))))
     (unless (find (intern object-type) abaplib-core--supported-type)
-      (error "Not in an valid abap development object."))
+      (error "Not a valid abap development file."))
     `((name . ,object-name)
       (type . ,object-type))))
 
