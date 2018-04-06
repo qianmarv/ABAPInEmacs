@@ -25,17 +25,7 @@
 ;;; Code:
 
 (require 'abaplib-core)
-;;==============================================================================
-;; Retrieve Program Source From Server
-;; TODO Consider ETag
-;; 1. Get Local Source Information (ETag)
-;; 2. Retrieve with ETag in Header
-;; 3. If Got 304 - Not Modified ==> Open Local Source File
-;; 4. If Got 200 => Overwrite On Current Implementation
-;; 4.1 => Overwrite Metadata File
-;; TODO 4.2.1 => If Local File Exist => Compare (EDiff) and Prompt to User
-;; 4.2.2 => No Local File => Directly Write to Local
-;;==============================================================================
+;==============================================================================
 
 (defvar-local abaplib-program--name nil
   "ABAP program name")
@@ -46,9 +36,12 @@
 (defvar-local abaplib-program--subtype nil
   "ABAP program subtype")
 
-(defconst abaplib-program--resource-programs "/programs/programs")
+(defconst abaplib-program--programs-uri-prefix "/sap/bc/adt/programs/programs")
+(defconst abaplib-program--includes-uri-prefix "/sap/bc/adt/programs/includes")
 
-(defconst abaplib-program--resource-includes "/programs/includes")
+(defvar abaplib-program--metadata-uri nil)
+(defvar abaplib-program--source-uri nil)
+
 
 (defun abaplib-program--get-properties ()
   " Get program properties"
@@ -109,9 +102,6 @@
   (expand-file-name (concat programe-name ".prog.abap")
                     (abaplib-program--get-directory)))
 
-
-
-
 (defun abaplib-program-submit()
   (let ((prog-name   (abaplib-object-get-name))
         (prog-source (buffer-substring-no-properties (point-min) (point-max)))
@@ -134,13 +124,7 @@
   ;; TODO Problebly not necessary to match etag as ADT always retrieve metadata
   ;;      Not sure whether etag will be verified in server side.
   (let* ((program-name abaplib-program--name)
-         (resource-uri (case (intern abaplib-program--subtype)
-                         ('P abaplib-program--resource-programs)
-                         ('I abaplib-program--resource-includes)))
-         (url (abaplib-get-project-api-url (concat abaplib-core--root-uri
-                                                   resource-uri
-                                                   "/"
-                                                   program-name))))
+         (url (abaplib-get-project-api-url (url (abaplib-get-project-api-url abaplib-program--source-uri)))))
     (abaplib--rest-api-call
      url
      (lambda (&rest rest)
@@ -162,14 +146,7 @@
 (defun abaplib-program--retrieve-source (&optional etag)
   "Retrieve program source from server"
   (let* ((program-name abaplib-program--name)
-         (resource-uri (case (intern abaplib-program--subtype)
-                         ('P abaplib-program--resource-programs)
-                         ('I abaplib-program--resource-includes)))
-         (url (abaplib-get-project-api-url (concat abaplib-core--root-uri
-                                                   resource-uri
-                                                   "/"
-                                                   program-name
-                                                   "/source/main"))))
+         (url (abaplib-get-project-api-url abaplib-program--source-uri)))
     (abaplib--rest-api-call
      url
      (lambda (&rest rest)
@@ -184,8 +161,9 @@
                     '("Content-Type" . "plain/text")))))
 
 (defun abaplib-program-do-retrieve(dev-object)
-  "Retrieve metadata"
-  (abaplib-program--parse-program-object dev-object)
+  "Retrieve source code"
+  (abaplib-program--init dev-object)
+
   (let ((source-etag (abaplib-program--get-property 'etag))
         (metadata-etag (abaplib-program--get-property 'metadata-etag)))
     (abaplib-program--retrieve-properties metadata-etag)
@@ -193,24 +171,49 @@
 
 (defun abaplib-program-do-check(dev-object)
   "Check syntax for program source "
-  (message "function: abaplib-program-do-check called with parameters: %s" dev-object)
-  (let* ((version (or version "active"))
-         (adtcore-uri (concat "/sap/bc/adt/programs/programs/" prog-name))
-         (chkrun-uri  (concat adtcore-uri "/source/main"))
-         (chkrun-content (base64-encode-string source))
-         (post-data (abaplib-core-check-syntax-template
-                     adtcore-uri
-                     chkrun-uri version chkrun-content)))
-    ;; before post
-    ;; (message post-data)
-    ))
+  (abaplib-program--init dev-object)
+  (let* ((version ((abaplib-program--get-property 'etag)))
+         (adtcore-uri abaplib-program--metadata-uri)
+         (chkrun-uri  abaplib-program--source-uri)
+         (chkrun-content (base64-encode-string (buffer-substring-no-properties
+                                                (point-min)
+                                                (point-max)))))
+    (abaplib-core-check-post version adtcore-uri chkrun-uri chkrun-content)))
 
-(defun abaplib-program--parse-program-object (dev-object)
+(defun abaplib-program-do-submit()
+  (interactive)
+  (let ((source (buffer-substring-no-properties (point-min) (point-max)))
+        (lock-handle (abaplib-core-lock)))
+    (abap--rest-call
+     (abaplib-service-get-uri 'save-program-source prog-name)
+     (lambda (&rest rest)
+       (let* ((response (cl-getf rest :response))
+              (ETag (request-response-header response "ETag")))
+         (message (format "Succeed with ETAG:%s" ETag))
+         (abaplib-core-unlock lock-handle)))
+     :type "PUT"
+     :data prog-source
+     :headers `(("Content-Type" . "text/plain"))
+     :params `(("lockHandle" . ,lock-handle))
+     )))
+
+(defun abaplib-program--init (dev-object)
   (let ((program-name (or (alist-get 'name dev-object)
                           abaplib-program--name))
-        (subtype (car (last (split-string (alist-get 'type dev-object) "/")))))
+        (subtype (car (last (split-string (alist-get 'type dev-object) "/"))))
+        (resource-uri (case (intern abaplib-program--subtype)
+                        ('P abaplib-program--resource-programs)
+                        ('I abaplib-program--resource-includes))))
     (setq abaplib-program--name program-name)
-    (setq abaplib-program--subtype subtype)))
+    (setq abaplib-program--subtype subtype)
+    (setq abaplib-program--metadata-uri (concat abaplib-program--programs-uri-prefix
+                                                "/"
+                                                program-name))
+    (setq abaplib-program--source-uri (concat abaplib-program--programs-uri-prefix
+                                              "/"
+                                              program-name
+                                              "/source/main"))))
+
 
 (provide 'abaplib-program)
 ;;; abaplib_programs.el ends here

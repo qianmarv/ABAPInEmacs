@@ -105,7 +105,7 @@
 (defconst abaplib--log-buffer "*ABAP Log*"
   "ABAP log buffer")
 
-(defconst abaplib-core--root-uri "/sap/bc/adt/"
+(defconst abaplib-core--root-uri nil
   "root uri of restful API")
 
 (defconst abaplib-core--resource-uri-login "/core/discovery")
@@ -312,29 +312,6 @@
         service-function
       fallback-function)))
 
-
-;; Obsolete
-(defun abaplib-service-get-uri (service &optional object-name)
-  (cond
-   ((eq service 'search-object)
-    (format "/sap/bc/adt/repository/informationsystem/search?operation=quickSearch&query=%s&maxResults=%s" object-name abap-search-list-max-result))
-   ((eq service 'get-program-metadata)
-    (format "/sap/bc/adt/programs/programs/%s" object-name))
-   ((eq service 'get-program-source)
-    (format "/sap/bc/adt/programs/programs/%s/source/main" object-name))
-   ((eq service 'save-program-source)
-    (format "/sap/bc/adt/programs/programs/%s/source/main" object-name))
-   ((eq service 'checkrun)
-    (format "/sap/bc/adt/checkruns?reporters=abapCheckRun"))
-   ((eq service 'lock)
-    (format "/sap/bc/adt/programs/programs/%s?_action=LOCK&accessMode=MODIFY" object-name))
-   ((eq service 'unlock)
-    (format "/sap/bc/adt/programs/programs/%s?_action=UNLOCK" object-name))
-   ((eq service 'activate)
-    (format "/sap/bc/adt/activation?method=activate&preauditRequested=true"))
-   (t (error "Service not implemented!"))
-   ))
-
 (defun abaplib--rest-api-call(resource-uri success-callback &rest args)
   "Call service API."
   (let* (
@@ -384,6 +361,30 @@
                               (message "%s" error-message))
                     ;; :complete (lambda (&rest -) (message "Complete" ))
                     args)))))
+
+;; Obsolete
+(defun abaplib-service-get-uri (service &optional object-name)
+  (cond
+   ((eq service 'search-object)
+    (format "/sap/bc/adt/repository/informationsystem/search?operation=quickSearch&query=%s&maxResults=%s" object-name abap-search-list-max-result))
+   ((eq service 'get-program-metadata)
+    (format "/sap/bc/adt/programs/programs/%s" object-name))
+   ((eq service 'get-program-source)
+    (format "/sap/bc/adt/programs/programs/%s/source/main" object-name))
+   ((eq service 'save-program-source)
+    (format "/sap/bc/adt/programs/programs/%s/source/main" object-name))
+   ((eq service 'checkrun)
+    (format "/sap/bc/adt/checkruns?reporters=abapCheckRun"))
+   ((eq service 'lock)
+    (format "/sap/bc/adt/programs/programs/%s?_action=LOCK&accessMode=MODIFY" object-name))
+   ((eq service 'unlock)
+    (format "/sap/bc/adt/programs/programs/%s?_action=UNLOCK" object-name))
+   ((eq service 'activate)
+    (format "/sap/bc/adt/activation?method=activate&preauditRequested=true"))
+   (t (error "Service not implemented!"))
+   ))
+
+
 
 ;;==============================================================================
 ;; Services Implementation - Search ABAP Object
@@ -438,43 +439,42 @@
 ;; Describe Object - Bufer/File Related
 ;;==============================================================================
 
+;; (defun abaplib-object-describe()
+;;   (abaplib-ensure-inside-project)
+;;   (let* ((file-name (file-name-nondirectory (buffer-file-name)))
+;;          (components  (split-string file-name "\\." t))
+;;          (object-name (car components))          ; Object Name
+;;          (sub-type (car (cdr components)))       ; Sub Type  , prog/clas/ddls
+;;          (source-type (car (last components)))   ; Major Type, abap/cds
+;;          (property-file (format "%s%s.%s.xml"
+;;                                 abaplib--project-config-dir
+;;                                 object-name
+;;                                 sub-type)))
+;;     (setq abaplib--object-props (with-temp-buffer
+;;                                   (insert-file-contents property-file)
+;;                                   (let* ((xml-root (libxml-parse-xml-region (point-min) (point-max)))
+;;                                          (properties (xml-node-attributes xml-root)))
+;;                                     properties
+;;                                     )))
+;;     ))
 
-(defun abaplib-object-describe()
-  (abaplib-ensure-inside-project)
-  (let* ((file-name (file-name-nondirectory (buffer-file-name)))
-         (components  (split-string file-name "\\." t))
-         (object-name (car components))          ; Object Name
-         (sub-type (car (cdr components)))       ; Sub Type  , prog/clas/ddls
-         (source-type (car (last components)))   ; Major Type, abap/cds
-         (property-file (format "%s%s.%s.xml"
-                                abaplib--project-config-dir
-                                object-name
-                                sub-type)))
-    (setq abaplib--object-props (with-temp-buffer
-                                  (insert-file-contents property-file)
-                                  (let* ((xml-root (libxml-parse-xml-region (point-min) (point-max)))
-                                         (properties (xml-node-attributes xml-root)))
-                                    properties
-                                    )))
-    ))
+;; (defun abaplib-object--get-property(property-name)
+;;   (unless abaplib--object-props
+;;     (abaplib-object-describe))
+;;   (cdr (assq property-name abaplib--object-props ))
+;;   )
 
-(defun abaplib-object--get-property(property-name)
-  (unless abaplib--object-props
-    (abaplib-object-describe))
-  (cdr (assq property-name abaplib--object-props ))
-  )
+;; (defun abaplib-object-get-name ()
+;;   (abaplib-object--get-property 'name))
 
-(defun abaplib-object-get-name ()
-  (abaplib-object--get-property 'name))
+;; (defun abaplib-object-get-version()
+;;   (abaplib-object--get-property 'version))
 
-(defun abaplib-object-get-version()
-  (abaplib-object--get-property 'version))
-
-(defun abaplib-object-get-type()
-  (abaplib-object--get-property 'type))
-;; (let ((core-type (abaplib-object--get-property 'type)))
-;;   (cond ((string= core-type "PROG/P") "prog")
-;;         (t nil))))
+;; (defun abaplib-object-get-type()
+;;   (abaplib-object--get-property 'type))
+;; ;; (let ((core-type (abaplib-object--get-property 'type)))
+;; ;;   (cond ((string= core-type "PROG/P") "prog")
+;; ;;         (t nil))))
 
 
 ;;==============================================================================
@@ -521,8 +521,7 @@
   (cond ((string= type "E") (propertize "Error"       'face '(bold (:foreground "red"))))
         ((string= type "W") (propertize "Warning"     'face '(bold (:foreground "orange"))))
         ((string= type "I") (propertize "Information" 'face '(bold (:foreground "green"))))
-        (t "Other"))
-  )
+        (t "Other")))
 
 (defun abaplib-core-check-render-pos(position &optional target-buffer)
   (let* ((target-buffer (or target-buffer (current-buffer)))
@@ -563,8 +562,7 @@
                       (concat (format "[%s] " (abaplib-core-check-render-type-text type))
                               (format "at position (%s): "
                                       (abaplib-core-check-render-pos position))
-                              text)))
-        ))
+                              text)))))
 
     (if output-log
         (abaplib-util-log-buf-write output-log))
@@ -576,8 +574,7 @@
           ((string= severity-level "E")
            (progn
              (message "Syntax check completed with `error' messages.")
-             (abaplib-util-log-buf-pop))))
-    ))
+             (abaplib-util-log-buf-pop))))))
 
 
 ;;========================================================================
@@ -634,27 +631,6 @@
      :params `(("lockHandle" . ,lock-handle))
      )))
 
-;;========================================================================
-;; Service - Push Source
-;;========================================================================
-
-(defun abaplib-core-push-prog ()
-  (interactive)
-  (let ((prog-name   (abaplib-object-get-name))
-        (prog-source (buffer-substring-no-properties (point-min) (point-max)))
-        (lock-handle (abaplib-core-lock)))
-    (abap--rest-call
-     (abaplib-service-get-uri 'save-program-source prog-name)
-     (lambda (&rest rest)
-       (let* ((response (cl-getf rest :response))
-              (ETag (request-response-header response "ETag")))
-         (message (format "Succeed with ETAG:%s" ETag))
-         (abaplib-core-unlock lock-handle)))
-     :type "PUT"
-     :data prog-source
-     :headers `(("Content-Type" . "text/plain"))
-     :params `(("lockHandle" . ,lock-handle))
-     )))
 
 ;;========================================================================
 ;; Service - Push Source
