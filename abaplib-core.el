@@ -489,7 +489,7 @@
    (format "<chkrun:checkObject adtcore:uri=\"%s\" chkrun:version=\"%s\">"
            adtcore-uri
            version)
-   (if chkrun-content
+   (when chkrun-content
        (concat
         "<chkrun:artifacts>"
         (format "<chkrun:artifact chkrun:contentType=\"text/plain; charset=utf-8\" chkrun:uri=\"%s\">"
@@ -497,13 +497,13 @@
         (format "<chkrun:content>%s</chkrun:content>"
                 chkrun-content)
         "</chkrun:artifact>"
-        "</chkrun:artifacts>" )
-     "")
+        "</chkrun:artifacts>" ))
    "</chkrun:checkObject>"
    "</chkrun:checkObjectList>"))
 
 (defun abaplib-core-check-post (version adtcore-uri chkrun-uri chkrun-content)
-  (abaplib-service-call
+  (let ((post-data (abaplib-core-check-template adtcore-uri chkrun-uri version chkrun-content)))
+    (abaplib-service-call
    (abaplib-service-get-uri 'checkrun)
    (lambda (&rest rest)
      (let* ((check-report (xml-get-children (cl-getf rest :data) 'checkReport))
@@ -513,8 +513,8 @@
        ))
    :parser 'abaplib-util-xml-parser
    :type "POST"
-   :data abaplib-core-check-template
-   :headers `(("Content-Type" . "application/vnd.sap.adt.checkobjects+xml"))))
+   :data post-data
+   :headers `(("Content-Type" . "application/vnd.sap.adt.checkobjects+xml")))))
 
 
 (defun abaplib-core-check-render-type-text(type)

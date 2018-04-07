@@ -42,7 +42,6 @@
 (defvar abaplib-program--metadata-uri nil)
 (defvar abaplib-program--source-uri nil)
 
-
 (defun abaplib-program--get-properties ()
   " Get program properties"
   (unless abaplib-program--name
@@ -143,7 +142,10 @@
      :parser 'abaplib-util-xml-parser
      :headers (list `("If-None-Match" . ,etag)))))
 
-(defun abaplib-program--retrieve-source (&optional etag)
+(defun abaplib-program--buffer-get-create (program-name)
+  (get-buffer-create (format "*(Server) %s *" program-name)))
+
+(defun abaplib-program--retrieve-source (etag &optional target-file)
   "Retrieve program source from server"
   (let* ((program-name abaplib-program--name)
          (url (abaplib-get-project-api-url abaplib-program--source-uri)))
@@ -154,7 +156,14 @@
              (status-code (request-response-status-code (cl-getf rest :response))))
          (if (eq status-code 304)
              (message "Program source remain unchanged in server.")
-           (write-region response-data nil (abaplib-program--get-source-file program-name))
+           (if target-file
+               (write-region response-data nil (abaplib-program--get-source-file program-name))
+             (let ((buffer (abaplib-program--buffer-get-create program-name)))
+               (set-buffer buffer)
+               (erase-buffer)
+               (goto-char (point-min))
+               (insert response-data)
+               (switch-to-buffer buffer)))
            (message "Program source retrieved from server and overwrite local."))))
      :parser 'abaplib-util-sourcecode-parser
      :headers (list `("If-None-Match" . ,etag)
@@ -165,12 +174,15 @@
   (abaplib-program--init dev-object)
 
   (let ((source-etag (abaplib-program--get-property 'etag))
-        (metadata-etag (abaplib-program--get-property 'metadata-etag)))
+        (metadata-etag (abaplib-program--get-property 'metadata-etag))
+        (source-file (abaplib-program--get-source-file program-name)))
     (abaplib-program--retrieve-properties metadata-etag)
-    (abaplib-program--retrieve-source source-etag)))
+    (abaplib-program--retrieve-source source-etag source-file)))
 
 (defun abaplib-program-do-check(dev-object)
-  "Check syntax for program source "
+  "Check syntax for program source
+  TODO check whether source changed since last retrieved from server
+       Not necessary to send the source code to server if no change."
   (abaplib-program--init dev-object)
   (let* ((version ((abaplib-program--get-property 'etag)))
          (adtcore-uri abaplib-program--metadata-uri)

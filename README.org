@@ -1,18 +1,19 @@
 #+TITLE: ABAP In Emacs (AiE)
 
 
-Working in Process...
+Not yet, Working in Process...
 
 * Introduction
-  Ever complaint about development efficiency effected by heavy loaded ABAP
-server which response like a snail? 
+  This package instend to create a complete ABAP development environment in
+  Emacs. Which should support below functions:
 
-  Ever complaint about lost your hours coding work when ABAP system down in a
-  sudden?
-
-  Ever thought about manage ABAP source code with distributed version management
-  tools like git? 
-
+  * Retrieve (Pull) source from ABAP server
+  * Offline edit
+  * Server side formating & auto-complete
+  * Server side syntax check
+  * Submit (push) source to ABAP server
+  * Activate source at ABAP server
+  * Run source (Not yet)
 * Install
 
 * How to Use
