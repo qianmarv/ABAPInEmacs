@@ -1,4 +1,20 @@
-;;; abap-in-emacs.el --- ABAP Development in Emacs   -*- lexical-binding: t; -*- ;; Copyright (C) 2018  Marvin Qian ;; Author: Marvin Qian <qianmarv@gmail.com> ;; Keywords: ;; This program is free software; you can redistribute it and/or modify ;; it under the terms of the GNU General Public License as published by ;; the Free Software Foundation, either version 3 of the License, or ;; (at your option) any later version. ;; This program is distributed in the hope that it will be useful,;; but WITHOUT ANY WARRANTY; without even the implied warranty of ;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the ;; GNU General Public License for more details. 
+;;; abap.el --- ABAP programs            -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2018  Marvin Qian
+
+;; Author: Marvin Qian <qianmarv@gmail.com>
+;; Keywords: 
+
+;; This program is free software; you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
 ;; You should have received a copy of the GNU General Public License
 ;; along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
@@ -8,7 +24,6 @@
 
 ;;; Code:
 
-;; (require 'abap-mode)
 (require 'abaplib-core)
 (require 'abaplib-program)
 
@@ -96,11 +111,11 @@
                              (type . ,abaplib-core--not-a-type))))
      (let* ((selected-object (split-string (completing-read "Maching Items: "
                                                             search-result) " " t))
-            (object-type (car (substring selected-object 0 4)))
+            (object-type (car selected-object))
             (object-name (car (cdr selected-object))))
        (abap-retrieve-source (list `(name . ,object-name)
                                    `(type . ,object-type)))
-       (let ((source-file (abaplib-program--get-source-file (alist-get 'name abap-object))))
+       (let ((source-file (abaplib-program--get-source-file object-name)))
          (unless (string= (buffer-file-name) source-file)
            (switch-to-buffer (find-file source-file))))))))
 

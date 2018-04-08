@@ -1,4 +1,4 @@
-;;; sap-abap-lib.el --- sap abap server lib          -*- lexical-binding: t; -*-
+;;; abaplib-core.el --- sap abap server lib          -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2018  Marvin Qian
 
@@ -374,9 +374,8 @@
 
 (defun abaplib-core-do-search (abap-object)
   "Search ABAP objects in server in synchronouse call"
-  (let* ((uri "/repository/informationsystem/search")
+  (let* ((url (abaplib-get-project-api-url "/sap/bc/adt/repository/informationsystem/search"))
          (query-string (alist-get 'name abap-object))
-         (url (abaplib-get-project-api-url uri))
          (params `((operation . "quickSearch")
                    (query . ,(concat "*" query-string "*"))
                    (maxResult . ,abap-search-list-max-result)))

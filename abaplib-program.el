@@ -1,4 +1,4 @@
-;;; abaplib_programs.el --- ABAP programs            -*- lexical-binding: t; -*-
+;;; abaplib-program.el --- ABAP programs            -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2018  Marvin Qian
 
@@ -215,8 +215,7 @@
 (defun abaplib-program--init (abap-object)
   ;; (message "called abaplib-program--init with: %s" abap-object)
   (let* ((program-name (alist-get 'name abap-object))
-         (properties   (abaplib-program--get-properties program-name))
-         (type (alist-get 'type properties))
+         (type (alist-get 'type abap-object))
          (sub-type (car (reverse (split-string type "/"))))
          (uri-prefix (case (intern sub-type)
                        ('P abaplib-program--programs-uri-prefix)
