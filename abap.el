@@ -96,7 +96,7 @@
                              (type . ,abaplib-core--not-a-type))))
      (let* ((selected-object (split-string (completing-read "Maching Items: "
                                                             search-result) " " t))
-            (object-type (car selected-object))
+            (object-type (car (substring selected-object 0 4)))
             (object-name (car (cdr selected-object))))
        (abap-retrieve-source (list `(name . ,object-name)
                                    `(type . ,object-type)))
@@ -119,19 +119,20 @@
     (abaplib-core-service-dispatch 'check abap-object)))
 
 
-(defun abap-submit-source ()
+(defun abap-submit-source (&optional abap-object)
   "Submit source"
   (interactive)
   (let ((abap-object (or abap-object
                         (abap-get-abap-object-from-file))))
     (abaplib-core-service-dispatch 'submit abap-object)))
 
-(defun abap-activate-source ()
+(defun abap-activate-source (&optional abap-object)
   "Activate source"
   (interactive)
   (let ((abap-object (or abap-object
                         (abap-get-abap-object-from-file))))
     (abaplib-core-service-dispatch 'activate abap-object)))
+
 
 
 (defun abap-get-abap-object-from-file()

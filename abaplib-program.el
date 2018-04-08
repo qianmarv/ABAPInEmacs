@@ -33,29 +33,34 @@
 (defvar-local abaplib-program--properties-cache nil
   "ABAP program properties")
 
-(defvar-local abaplib-program--subtype nil
-  "ABAP program subtype")
+;; (defvar-local abaplib-program--subtype nil
+;;   "ABAP program subtype")
 
 (defconst abaplib-program--programs-uri-prefix "/sap/bc/adt/programs/programs")
 (defconst abaplib-program--includes-uri-prefix "/sap/bc/adt/programs/includes")
 
-(defvar abaplib-program--metadata-uri nil)
+(defvar abaplib-program--uri nil)
 (defvar abaplib-program--source-uri nil)
 
-(defun abaplib-program--get-properties ()
-  " Get program properties"
-  (unless abaplib-program--name
-    (error "Program is nil"))
-  (unless abaplib-program--properties-cache
-    (let ((prop-file (expand-file-name (concat abaplib-program--name ".prog.json")
-                                       (abaplib-get-project-cache-dir))))
-      (when (file-exists-p prop-file)
-        (setq abaplib-program--properties-cache (json-read-file prop-file)))))
-  abaplib-program--properties-cache)
 
-(defun abaplib-program--get-property (key)
+;; FIXME 1. Add programe name to metdata file
+;;       2. verify program name while retrieve from cache
+(defun abaplib-program--get-properties (&optional program-name)
+  " Get program properties"
+  (let ((program-name (or program-name
+                          abaplib-program--name)))
+    (unless program-name
+      (error "Program is nil"))
+    (unless abaplib-program--properties-cache
+      (let ((prop-file (expand-file-name (concat program-name ".prog.json")
+                                         (abaplib-get-project-cache-dir))))
+        (when (file-exists-p prop-file)
+          (setq abaplib-program--properties-cache (json-read-file prop-file)))))
+    abaplib-program--properties-cache))
+
+(defun abaplib-program--get-property (key &optional program-name)
   " Get program property by key"
-  (alist-get key (abaplib-program--get-properties)))
+  (alist-get key (abaplib-program--get-properties program-name)))
 
 (defun abaplib-program--set-properties(properties)
   " Get metadata from cache"
@@ -101,29 +106,13 @@
   (expand-file-name (concat programe-name ".prog.abap")
                     (abaplib-program--get-directory)))
 
-(defun abaplib-program-submit()
-  (let ((prog-name   (abaplib-object-get-name))
-        (prog-source (buffer-substring-no-properties (point-min) (point-max)))
-        (lock-handle (abaplib-core-lock)))
-    (abaplib-service-call
-     (abaplib-service-get-uri 'save-program-source prog-name)
-     (lambda (&rest rest)
-       (let* ((response (cl-getf rest :response))
-              (ETag (request-response-header response "ETag")))
-         (message (format "Succeed with ETAG:%s" ETag))
-         (abaplib-core-unlock lock-handle)))
-     :type "PUT"
-     :data prog-source
-     :headers `(("Content-Type" . "text/plain"))
-     :params `(("lockHandle" . ,lock-handle))
-     )))
 
 (defun abaplib-program--retrieve-properties (&optional etag)
   "Retrieve program metadata from server"
   ;; TODO Problebly not necessary to match etag as ADT always retrieve metadata
   ;;      Not sure whether etag will be verified in server side.
   (let* ((program-name abaplib-program--name)
-         (url (abaplib-get-project-api-url (url (abaplib-get-project-api-url abaplib-program--source-uri)))))
+         (url (abaplib-get-project-api-url abaplib-program--uri)))
     (abaplib--rest-api-call
      url
      (lambda (&rest rest)
@@ -138,7 +127,7 @@
                                              (list `(metadata-etag . ,metadata-etag))))
 
            (abaplib-program--set-properties properties)
-           (message "Program metadata retrieved."))))
+           (message "Program metadata refreshed."))))
      :parser 'abaplib-util-xml-parser
      :headers (list `("If-None-Match" . ,etag)))))
 
@@ -169,62 +158,73 @@
      :headers (list `("If-None-Match" . ,etag)
                     '("Content-Type" . "plain/text")))))
 
-(defun abaplib-program-do-retrieve(dev-object)
+(defun abaplib-program-do-retrieve(abap-object)
   "Retrieve source code"
-  (abaplib-program--init dev-object)
+  (abaplib-program--init abap-object)
 
   (let ((source-etag (abaplib-program--get-property 'etag))
         (metadata-etag (abaplib-program--get-property 'metadata-etag))
-        (source-file (abaplib-program--get-source-file program-name)))
+        (source-file (abaplib-program--get-source-file abaplib-program--name)))
     (abaplib-program--retrieve-properties metadata-etag)
     (abaplib-program--retrieve-source source-etag source-file)))
 
-(defun abaplib-program-do-check(dev-object)
+(defun abaplib-program-do-check(abap-object)
   "Check syntax for program source
   TODO check whether source changed since last retrieved from server
        Not necessary to send the source code to server if no change."
-  (abaplib-program--init dev-object)
-  (let* ((version ((abaplib-program--get-property 'etag)))
-         (adtcore-uri abaplib-program--metadata-uri)
-         (chkrun-uri  abaplib-program--source-uri)
-         (chkrun-content (base64-encode-string (buffer-substring-no-properties
-                                                (point-min)
-                                                (point-max)))))
+  (abaplib-program--init abap-object)
+  (let ((version (abaplib-program--get-property 'version))
+        (adtcore-uri abaplib-program--uri)
+        (chkrun-uri  abaplib-program--source-uri)
+        (chkrun-content (base64-encode-string (buffer-substring-no-properties
+                                               (point-min)
+                                               (point-max)))))
     (abaplib-core-check-post version adtcore-uri chkrun-uri chkrun-content)))
 
-(defun abaplib-program-do-submit()
-  (interactive)
-  (let ((source (buffer-substring-no-properties (point-min) (point-max)))
-        (lock-handle (abaplib-core-lock)))
-    (abap--rest-call
-     (abaplib-service-get-uri 'save-program-source prog-name)
+(defun abaplib-program-do-submit(abap-object)
+  "Submit source to server
+
+   TODO Check source in server side if current source was changed based on an old version
+   The submission should be cancelled"
+  (abaplib-program--init abap-object)
+  (let* ((source (buffer-substring-no-properties (point-min) (point-max)))
+         (csrf-token (abaplib-core-get-csrf-token))
+         (lock-handle (abaplib-core-lock-sync abaplib-program--uri csrf-token)))
+    (abaplib--rest-api-call
+     (abaplib-get-project-api-url abaplib-program--source-uri)
      (lambda (&rest rest)
        (let* ((response (cl-getf rest :response))
               (ETag (request-response-header response "ETag")))
-         (message (format "Succeed with ETAG:%s" ETag))
-         (abaplib-core-unlock lock-handle)))
+         (abaplib-program--retrieve-properties)
+         (message "program submit to server success.")))
      :type "PUT"
-     :data prog-source
-     :headers `(("Content-Type" . "text/plain"))
+     :data source
+     :headers `(("Content-Type" . "text/plain")
+                ("x-csrf-token" . ,csrf-token))
      :params `(("lockHandle" . ,lock-handle))
      )))
 
-(defun abaplib-program--init (dev-object)
-  (let ((program-name (or (alist-get 'name dev-object)
-                          abaplib-program--name))
-        (subtype (car (last (split-string (alist-get 'type dev-object) "/"))))
-        (resource-uri (case (intern abaplib-program--subtype)
-                        ('P abaplib-program--resource-programs)
-                        ('I abaplib-program--resource-includes))))
+(defun abaplib-program-do-activate(abap-object)
+  "Activate source in server"
+  (abaplib-program--init abap-object)
+  (let* ((adtcore-name abaplib-program--name)
+         (adtcore-uri abaplib-program--uri))
+    (abaplib-core-activate-post adtcore-name adtcore-uri)))
+
+
+(defun abaplib-program--init (abap-object)
+  ;; (message "called abaplib-program--init with: %s" abap-object)
+  (let* ((program-name (alist-get 'name abap-object))
+         (properties   (abaplib-program--get-properties program-name))
+         (type (alist-get 'type properties))
+         (sub-type (car (reverse (split-string type "/"))))
+         (uri-prefix (case (intern sub-type)
+                       ('P abaplib-program--programs-uri-prefix)
+                       ('I abaplib-program--includes-uri-prefix))))
+
     (setq abaplib-program--name program-name)
-    (setq abaplib-program--subtype subtype)
-    (setq abaplib-program--metadata-uri (concat abaplib-program--programs-uri-prefix
-                                                "/"
-                                                program-name))
-    (setq abaplib-program--source-uri (concat abaplib-program--programs-uri-prefix
-                                              "/"
-                                              program-name
-                                              "/source/main"))))
+    (setq abaplib-program--uri (concat uri-prefix "/" program-name))
+    (setq abaplib-program--source-uri (concat uri-prefix "/" program-name "/source/main"))))
 
 
 (provide 'abaplib-program)

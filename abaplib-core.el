@@ -108,7 +108,7 @@
 (defconst abaplib-core--root-uri nil
   "root uri of restful API")
 
-(defconst abaplib-core--resource-uri-login "/core/discovery")
+(defconst abaplib-core--uri-login "/sap/bc/adt/core/discovery")
 
 ;;==============================================================================
 ;; Project
@@ -208,12 +208,12 @@
     (abaplib-save-workspace-descriptor new-descriptor)
     (setq abaplib--current-project nil)))
 
-(defun abaplib-get-project-api-url (resource-uri)
+(defun abaplib-get-project-api-url (uri)
   "Compose full API url"
-  (if (string-match "^http[s]*://" resource-uri) resource-uri
+  (if (string-match "^http[s]*://" uri)
+      uri
     (concat (replace-regexp-in-string "/*$" "/" (abaplib-project-get-property 'server))
-            (replace-regexp-in-string "^/*" "" abaplib-core--root-uri)
-            (replace-regexp-in-string "^/*" "" resource-uri))))
+            (replace-regexp-in-string "^/*" "" uri))))
 
 (defun abaplib-get-project-cache-dir ()
   "Get project cache directory"
@@ -233,7 +233,7 @@
 
 (defun abaplib-auth-login-with-token(project login-token sap-client)
   "Login into ABAP Server with token"
-  (let ((url (abaplib-get-project-api-url abaplib-core--resource-uri-login))
+  (let ((url (abaplib-get-project-api-url abaplib-core--uri-login))
         (login-status))
     (unless server
       (error "Project %s not bind to any server" project))
@@ -300,7 +300,7 @@
 
 (defun abaplib-core--get-service-func (service object-type)
   "Internal function: get service function"
-  (let* ((impl-prefix (case (intern (substring object-type 0 4))
+  (let* ((impl-prefix (case (intern object-type)
                         ('PROG "program")
                         ('CLAS "class")
                         ('DLCS "cds")
@@ -312,33 +312,38 @@
         service-function
       fallback-function)))
 
-(defun abaplib--rest-api-call(resource-uri success-callback &rest args)
+(defun abaplib-core-get-csrf-token ()
+  (let* ((login-token (cons "Authorization" (abaplib-get-login-token)))
+         (sap-client (abaplib-get-sap-client))
+         (login-url (abaplib-get-project-api-url abaplib-core--uri-login))
+         (response (request
+                    login-url
+                    :sync t
+                    :headers (list (cons "X-CSRF-Token" "Fetch") login-token)
+                    :params `((sap-client . ,sap-client)))))
+    (request-response-header response "x-csrf-token")))
+
+(defun abaplib--rest-api-call(uri success-callback &rest args)
   "Call service API."
-  (let* (
-         ;; (project abaplib--current-project)
-         (url (abaplib-get-project-api-url resource-uri))
+  (let* ((url (abaplib-get-project-api-url uri))
          (login-token (cons "Authorization" (abaplib-get-login-token)))
-         (sap-client (abaplib-get-sap-client ))
          (headers (cl-getf args :headers))
          (type    (or (cl-getf args :type) "GET"))
          (params (cl-getf args :params)))
 
     ;; For method like POST, PUT, DELETE, required to get CSRF Token first
+    ;; (message "headers:= %s" headers)
     (if (string= type "GET")
         (setq headers (append headers (list login-token)))
-      (let* ((login-url (abaplib-get-project-api-url abaplib-core--resource-uri-login))
-             (response (request
-                        login-url
-                        :sync t
-                        :headers (list (cons "X-CSRF-Token" "Fetch")login-token)
-                        :params `((sap-client . ,sap-client))))
-             (csrf-token-string (request-response-header response "x-csrf-token")))
-        (setq headers (append headers
-                              (list (cons "x-csrf-token" csrf-token-string))))))
+      (unless (assoc-string 'x-csrf-token headers)
+        (let ((csrf-token (abaplib-core-get-csrf-token)))
+          (setq headers
+                (append headers
+                        (list (cons "x-csrf-token" csrf-token)))))))
 
     ;; TODO Delete :headers from args as we have explicitly put headers here
-    (setq params (append params
-                         (list (cons "sap-client" sap-client))))
+    ;; (setq params (append params
+    ;;                      (list (cons "sap-client" sap-client))))
     (append (request-response-data
              (apply #'request
                     url
@@ -362,29 +367,6 @@
                     ;; :complete (lambda (&rest -) (message "Complete" ))
                     args)))))
 
-;; Obsolete
-(defun abaplib-service-get-uri (service &optional object-name)
-  (cond
-   ((eq service 'search-object)
-    (format "/sap/bc/adt/repository/informationsystem/search?operation=quickSearch&query=%s&maxResults=%s" object-name abap-search-list-max-result))
-   ((eq service 'get-program-metadata)
-    (format "/sap/bc/adt/programs/programs/%s" object-name))
-   ((eq service 'get-program-source)
-    (format "/sap/bc/adt/programs/programs/%s/source/main" object-name))
-   ((eq service 'save-program-source)
-    (format "/sap/bc/adt/programs/programs/%s/source/main" object-name))
-   ((eq service 'checkrun)
-    (format "/sap/bc/adt/checkruns?reporters=abapCheckRun"))
-   ((eq service 'lock)
-    (format "/sap/bc/adt/programs/programs/%s?_action=LOCK&accessMode=MODIFY" object-name))
-   ((eq service 'unlock)
-    (format "/sap/bc/adt/programs/programs/%s?_action=UNLOCK" object-name))
-   ((eq service 'activate)
-    (format "/sap/bc/adt/activation?method=activate&preauditRequested=true"))
-   (t (error "Service not implemented!"))
-   ))
-
-
 
 ;;==============================================================================
 ;; Services Implementation - Search ABAP Object
@@ -392,9 +374,9 @@
 
 (defun abaplib-core-do-search (abap-object)
   "Search ABAP objects in server in synchronouse call"
-  (let* ((resource-uri "/repository/informationsystem/search")
+  (let* ((uri "/repository/informationsystem/search")
          (query-string (alist-get 'name abap-object))
-         (url (abaplib-get-project-api-url resource-uri))
+         (url (abaplib-get-project-api-url uri))
          (params `((operation . "quickSearch")
                    (query . ,(concat "*" query-string "*"))
                    (maxResult . ,abap-search-list-max-result)))
@@ -435,47 +417,6 @@
   (abaplib-core--raise-fallback-error abap-object))
 
 
-;;==============================================================================
-;; Describe Object - Bufer/File Related
-;;==============================================================================
-
-;; (defun abaplib-object-describe()
-;;   (abaplib-ensure-inside-project)
-;;   (let* ((file-name (file-name-nondirectory (buffer-file-name)))
-;;          (components  (split-string file-name "\\." t))
-;;          (object-name (car components))          ; Object Name
-;;          (sub-type (car (cdr components)))       ; Sub Type  , prog/clas/ddls
-;;          (source-type (car (last components)))   ; Major Type, abap/cds
-;;          (property-file (format "%s%s.%s.xml"
-;;                                 abaplib--project-config-dir
-;;                                 object-name
-;;                                 sub-type)))
-;;     (setq abaplib--object-props (with-temp-buffer
-;;                                   (insert-file-contents property-file)
-;;                                   (let* ((xml-root (libxml-parse-xml-region (point-min) (point-max)))
-;;                                          (properties (xml-node-attributes xml-root)))
-;;                                     properties
-;;                                     )))
-;;     ))
-
-;; (defun abaplib-object--get-property(property-name)
-;;   (unless abaplib--object-props
-;;     (abaplib-object-describe))
-;;   (cdr (assq property-name abaplib--object-props ))
-;;   )
-
-;; (defun abaplib-object-get-name ()
-;;   (abaplib-object--get-property 'name))
-
-;; (defun abaplib-object-get-version()
-;;   (abaplib-object--get-property 'version))
-
-;; (defun abaplib-object-get-type()
-;;   (abaplib-object--get-property 'type))
-;; ;; (let ((core-type (abaplib-object--get-property 'type)))
-;; ;;   (cond ((string= core-type "PROG/P") "prog")
-;; ;;         (t nil))))
-
 
 ;;==============================================================================
 ;; Service - Syntax Check
@@ -490,31 +431,31 @@
            adtcore-uri
            version)
    (when chkrun-content
-       (concat
-        "<chkrun:artifacts>"
-        (format "<chkrun:artifact chkrun:contentType=\"text/plain; charset=utf-8\" chkrun:uri=\"%s\">"
-                chkrun-uri)
-        (format "<chkrun:content>%s</chkrun:content>"
-                chkrun-content)
-        "</chkrun:artifact>"
-        "</chkrun:artifacts>" ))
+     (concat
+      "<chkrun:artifacts>"
+      (format "<chkrun:artifact chkrun:contentType=\"text/plain; charset=utf-8\" chkrun:uri=\"%s\">"
+              chkrun-uri)
+      (format "<chkrun:content>%s</chkrun:content>"
+              chkrun-content)
+      "</chkrun:artifact>"
+      "</chkrun:artifacts>" ))
    "</chkrun:checkObject>"
    "</chkrun:checkObjectList>"))
 
 (defun abaplib-core-check-post (version adtcore-uri chkrun-uri chkrun-content)
   (let ((post-data (abaplib-core-check-template adtcore-uri chkrun-uri version chkrun-content)))
-    (abaplib-service-call
-   (abaplib-service-get-uri 'checkrun)
-   (lambda (&rest rest)
-     (let* ((check-report (xml-get-children (cl-getf rest :data) 'checkReport))
-            (message-list (xml-get-children (car check-report) 'checkMessageList))
-            (messages (xml-get-children (car message-list) 'checkMessage)))
-       (abaplib-core-check-show-message messages)
-       ))
-   :parser 'abaplib-util-xml-parser
-   :type "POST"
-   :data post-data
-   :headers `(("Content-Type" . "application/vnd.sap.adt.checkobjects+xml")))))
+    (abaplib--rest-api-call
+     (abaplib-get-project-api-url "/sap/bc/adt/checkruns")
+     (lambda (&rest rest)
+       (let* ((check-report (xml-get-children (cl-getf rest :data) 'checkReport))
+              (message-list (xml-get-children (car check-report) 'checkMessageList))
+              (messages (xml-get-children (car message-list) 'checkMessage)))
+         (abaplib-core-check-show-message messages)))
+     :parser 'abaplib-util-xml-parser
+     :type "POST"
+     :data post-data
+     :params '((reporters . abapCheckRun))
+     :headers `(("Content-Type" . "application/vnd.sap.adt.checkobjects+xml")))))
 
 
 (defun abaplib-core-check-render-type-text(type)
@@ -580,22 +521,19 @@
 ;;========================================================================
 ;; Service - Lock & Unlock
 ;;========================================================================
-
-(defun abaplib-core-lock()
-  ;; (interactive)  ;;  "Testing phase"
-  ;; Should be invoked in sync way
-  ;; (setq abaplib--lock-handle nil)
-  (let* ((prog-name (abaplib-object-get-name))
-         (root-node (abap--rest-call
-                     (abaplib-service-get-uri 'lock prog-name)
+;;_action=LOCK&accessMode=MODIFY
+(defun abaplib-core-lock-sync(uri csrf-token)
+  (let* ((root-node (abaplib--rest-api-call
+                     (abaplib-get-project-api-url uri)
                      nil
                      :parser 'abaplib-util-xml-parser
+                     :params '((_action . LOCK)
+                               (accessMode . MODIFY))
                      :type "POST"
-                     :headers `(("X-sap-adt-sessiontype" . "stateful"))
-                     ))
+                     :headers `(("X-sap-adt-sessiontype" . "stateful")
+                                ("x-csrf-token" . ,csrf-token))))
          (node-name (xml-node-name root-node)))
     (if (string= node-name "abap")
-        ;; (setq abaplib--lock-handle
         ((lambda (abap-node) ;; Get lock handle
            (car (last
                  (car (xml-get-children
@@ -603,16 +541,13 @@
                              (car (xml-get-children abap-node 'values))
                              'DATA))
                        'LOCK_HANDLE))))) root-node)
-      ;; )
       ;; Request lock failed
       (let ((error-message
              ((lambda (exception-node)
                 (car (last
                       (car (xml-get-children exception-node 'localizedMessage)))))
               root-node)))
-        (error  error-message))
-      )
-    ))
+        (error  error-message)))))
 
 ;; (defun abaplib-core-lock-get-handle()
 ;;   (unless abaplib--lock-handle
@@ -620,17 +555,15 @@
 ;;   abaplib--lock-handle
 ;;   )
 
-(defun abaplib-core-unlock (lock-handle)
+(defun abaplib-core-unlock-async (uri lock-handle)
   (let ((prog-name (abaplib-object-get-name)))
-    (abap--rest-call
-     (abaplib-service-get-uri 'unlock prog-name)
+    (abaplib--rest-api-call
+     (abaplib-get-project-api-url uri)
      (lambda (&rest response)
        (message "Unlocked."))
      :type "POST"
      :headers `(("X-sap-adt-sessiontype" . "stateless"))
-     :params `(("lockHandle" . ,lock-handle))
-     )))
-
+     :params `(("lockHandle" . ,lock-handle)))))
 
 ;;========================================================================
 ;; Service - Push Source
@@ -668,8 +601,7 @@
                       (concat (format "[%s] " (abaplib-core-check-render-type-text type))
                               (format "at position (%s): "
                                       (abaplib-core-check-render-pos position))
-                              text)))
-        ))
+                              text)))))
 
     (if output-log
         (abaplib-util-log-buf-write output-log))
@@ -681,26 +613,20 @@
           ((string= severity-level "E")
            (progn
              (message "Activation failed with `errors'")
-             (abaplib-util-log-buf-pop))))
-    ))
+             (abaplib-util-log-buf-pop))))))
 
-(defun abaplib-core-activate-prog ()
-  (interactive)
-  (let* ((prog-name   (abaplib-object-get-name))
-         (adtcore-name (upcase prog-name))
-         (adtcore-uri (concat "/sap/bc/adt/programs/programs/" prog-name))
-         (post-xml (abaplib-core-activate-template adtcore-name adtcore-uri)))
-    (abap--rest-call
-     (abaplib-service-get-uri 'activate)
+(defun abaplib-core-activate-post(adtcore-name adtcore-uri)
+  (let ((post-body (abaplib-core-activate-template adtcore-name adtcore-uri)))
+    (abaplib--rest-api-call
+     (abaplib-get-project-api-url "/sap/bc/adt/activation")
      (lambda (&rest rest)
        (let* ((messages (xml-get-children (cl-getf rest :data) 'msg)))
-         (abaplib-core-activate-show-message messages)
-         ))
+         (abaplib-core-activate-show-message messages)))
      :parser 'abaplib-util-xml-parser
      :type "POST"
-     :data post-xml
-     ))
-  )
+     :params '((method . activate)
+               (preauditRequested . true))
+     :data post-body)))
 
 (provide 'abaplib-core)
 ;;; abaplib.el ends here
