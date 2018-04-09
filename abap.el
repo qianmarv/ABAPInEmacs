@@ -111,13 +111,19 @@
                              (type . ,abaplib-core--not-a-type))))
      (let* ((selected-object (split-string (completing-read "Maching Items: "
                                                             search-result) " " t))
-            (object-type (car selected-object))
-            (object-name (car (cdr selected-object))))
+            (adtcore-type (split-string (car selected-object) "/"))
+            (object-type (car adtcore-type))
+            (object-subtype (nth 1 adtcore-type))
+            (object-name (nth 1 selected-object)))
        (abap-retrieve-source (list `(name . ,object-name)
-                                   `(type . ,object-type)))
-       (let ((source-file (abaplib-program--get-source-file object-name)))
-         (unless (string= (buffer-file-name) source-file)
-           (switch-to-buffer (find-file source-file))))))))
+                                   `(type . ,object-type)
+                                   `(subtype . ,object-subtype)))
+       ;; FIXME Debugger entered--Lisp error:
+       ;;      (wrong-type-argument sequencep #<buffer RTC_CT.prog.abap>)
+       ;; (let ((source-file (abaplib-program--get-source-file object-name)))
+       ;;   (unless (string= (buffer-file-name) source-file)
+       ;;     (switch-to-buffer (find-file source-file))))
+       ))))
 
 (defun abap-retrieve-source (&optional abap-object)
   "Retrieve source"
@@ -147,8 +153,6 @@
   (let ((abap-object (or abap-object
                         (abap-get-abap-object-from-file))))
     (abaplib-core-service-dispatch 'activate abap-object)))
-
-
 
 (defun abap-get-abap-object-from-file()
   (let* ((file-name (file-name-nondirectory (buffer-file-name)))
