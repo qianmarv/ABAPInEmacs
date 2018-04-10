@@ -110,6 +110,9 @@
 
 (defconst abaplib-core--uri-login "/sap/bc/adt/core/discovery")
 
+(defconst abaplib-core--folder-S "Source Code Library")
+(defconst abaplib-core--folder-C "Core Data Services")
+
 ;;==============================================================================
 ;; Project
 ;;==============================================================================
@@ -223,6 +226,10 @@
     (unless (file-exists-p cache-dir)
       (make-directory cache-dir))
     cache-dir))
+
+(defun abaplib-get-project-path ()
+  "Get project path"
+  (abaplib-project-get-property 'path))
 
 ;;==============================================================================
 ;; Authentication

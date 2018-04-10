@@ -26,6 +26,34 @@
       3. optionally with *Activate* action
     - abapgit check
       1. call *check* action
+*** Source Structure
+    Source Code Library
+    |-- Programs
+    |   |-- RTC_CT
+    |       |-- main.prog.abap
+    |       |-- properties.json
+    |
+    |-- Includes
+    |   |-- RTC_CT_CLS
+    |       |-- main.prog.abap
+    |       |-- properties.json
+    |
+    |-- Classes
+    |   |-- CL_RTC_CT
+    |       |-- main.clas.abap
+    |       |-- definitions.clas.abap
+    |       |-- implementations.clas.abap
+    |       |-- macros.clas.abap
+    |       |-- testclasses.clas.abap
+    |       |-- properties.json
+    |
+    |-- Foundation Groups
+    |   |-- FINCS_SELECTION
+    |       |--main.prog.abap
+    |       |--includes
+    |       |-- LFINCS_SELECTIONF01
+    |       |--main.prog.abap
+
 ** DONE Project Management
    CLOSED: [2018-03-16 Fri 19:04]
    - Setup Project
