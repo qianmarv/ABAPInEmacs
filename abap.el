@@ -40,7 +40,7 @@
   (interactive)
   (let* ((project-name (or (read-string "Project name (without blank): " )
                            (error "project name can't be empty")))
-         (parent-dir (read-string "Workspace directory:" abap-workspace-dir))
+         (parent-dir (read-directory-name "Workspace directory:" abap-workspace-dir))
          (project (expand-file-name project-name parent-dir)))
     (unless (file-directory-p parent-dir)
       (make-directory parent-dir))
@@ -52,7 +52,7 @@
   (interactive)
   (let* ((current-dir (abaplib-util-current-dir))
          (project(expand-file-name
-                  (read-string "Init project: "
+                  (read-directory-name "Init project: "
                                (abaplib-project-init-propose current-dir)))))
     (abaplib-create-project project)
     (message "Project %s added to workspace." project)))
@@ -118,6 +118,7 @@
        (abap-retrieve-source (list `(name . ,object-name)
                                    `(type . ,object-type)
                                    `(subtype . ,object-subtype)))
+       nil
        ;; FIXME Debugger entered--Lisp error:
        ;;      (wrong-type-argument sequencep #<buffer RTC_CT.prog.abap>)
        ;; (let ((source-file (abaplib-program--get-source-file object-name)))

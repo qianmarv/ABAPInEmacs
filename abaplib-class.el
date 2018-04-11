@@ -40,6 +40,8 @@
 
 (defconst abaplib-class--folder "Classes")
 
+(defconst abaplib-class--source-file-suffix ".clas.abap")
+
 
 
 (defun abaplib-class--get-root-directory ()
@@ -49,7 +51,7 @@
     (unless (file-directory-p source-dir)
       (make-directory source-dir))
     (unless (file-directory-p classes-dir)
-      (make-directory class-dir))
+      (make-directory classes-dir))
     classes-dir))
 
 (defun abaplib-class--get-directory(&optional class-name)
@@ -69,7 +71,7 @@
                          (error "Class is unknown!")))
          (class-dir (abaplib-class--get-directory class-name)))
     (unless abaplib-class--properties-cache
-      (let ((prop-file (expand-file-name "properties.json" class-dir)))
+      (let ((prop-file (expand-file-name ".properties.json" class-dir)))
         (when (file-exists-p prop-file)
           (setq abaplib-class--properties-cache (json-read-file prop-file)))))
     abaplib-class--properties-cache))
@@ -87,7 +89,7 @@
                            abaplib-class--name
                            (error "Class is unknown!")))
           (class-dir (abaplib-class--get-directory class-name))
-          (prop-file (expand-file-name "properties.json" class-dir)))
+          (prop-file (expand-file-name ".properties.json" class-dir)))
       (abaplib-util-jsonize-to-file properties prop-file)
       (setq abaplib-class--properties-cache properties)))
 
@@ -97,7 +99,7 @@
   ;;    (abaplib-util-upsert-alists (abaplib-class--get-properties) (cons key value))))
 
   (defun abaplib-class--parse-metadata (xml-node)
-    (message "Parse metadata.")
+    ;; (message "Parse metadata.")
     (let* ((adtcore-type (xml-get-attribute xml-node 'type))
            (type-list (split-string adtcore-type "/"))
            (type (car type-list))
@@ -105,71 +107,68 @@
            (name (xml-get-attribute xml-node 'name))
            (description (xml-get-attribute xml-node 'description))
            (version (xml-get-attribute xml-node 'version))
-           (includes (xml-get-children xml-node 'include))
            (package-node (car (xml-get-children xml-node 'packageRef)))
            (package (xml-get-attribute package-node 'name))
-           (etag))
-      (dolist (include includes)
-        (when (string= (xml-get-attribute link 'type) "text/plain")
-          (setq etag (xml-get-attribute link 'etag))
-          (return)))
+           (includes-node (xml-get-children xml-node 'include))
+           (includes (mapcar
+                      (lambda (include)
+                        (let ((version (xml-get-attribute include 'version))
+                              (source-uri (xml-get-attribute include 'sourceUri))
+                              (include-type (xml-get-attribute include 'includeType))
+                              (type (xml-get-attribute include 'type))
+                              (links (xml-get-children include 'link))
+                              (etag))
+                          (dolist (link links)
+                            (when (string= (xml-get-attribute link 'type) "text/plain")
+                              (setq etag (xml-get-attribute link 'etag))
+                              (return)))
+                          (cons include-type `((version . ,version)
+                                               (source-uri . ,source-uri)
+                                               (type . ,type)
+                                               (etag . ,etag)))))
+                      includes-node)))
       `((name . ,name)
         (description . ,description)
         (type . ,type)
         (subtype . ,subtype)
         (version . ,version)
-        ;; (source-uri . ,sourceUri)
         (package . ,package)
-        (etag . ,etag))))
+        (includes . ,includes))))
 
-(defun abaplib-class--retrieve-properties-sync ()
+(defun abaplib-class--retrieve-properties ()
   "Retrieve class metadata from server"
   (let* ((etag (abaplib-class--get-property 'metadata-etag))
          (class-name abaplib-class--name)
          (url (abaplib-get-project-api-url abaplib-class--uri))
          (data (abaplib--rest-api-call url
                                        nil
-                                       :parser 'abaplib-util-xml-parser
-                                       ;; :headers (list `("If-None-Match" . ,etag))
-                                       )))
-    ;; (data (request-response-data response))
-    ;; (status-code (request-response-status-code response))
-    ;; (metadata-etag (request-response-header response "ETag")))
-
-    (abaplib-class--set-properties (abaplib-class--parse-metadata data))
-    ;; (unless (eq status-code 304) ;; Not modified
-    ;; (abaplib-class--set-properties
-    ;; (append
-    ;;                                (abaplib-class--parse-metadata data)
-    ;;                                (list `(metadata-etag . ,metadata-etag))))
-    (message "class metadata refreshed.")))
+                                       :parser 'abaplib-util-xml-parser)))
+    (abaplib-class--set-properties (abaplib-class--parse-metadata data))))
 
 ;; (defun abaplib-class--buffer-get-create (class-name)
 ;;   (get-buffer-create (format "*(Server) %s *" class-name)))
 
-;; (defun abaplib-class--retrieve-source (etag &optional target-file)
-;;   "Retrieve program source from server"
-;;   (let* ((class-name abaplib-class--name)
-;;          (url (abaplib-get-project-api-url abaplib-class--source-uri)))
-;;     (abaplib--rest-api-call
-;;      url
-;;      (lambda (&rest rest)
-;;        (let ((response-data (cl-getf rest :data))
-;;              (status-code (request-response-status-code (cl-getf rest :response))))
-;;          (if (eq status-code 304)
-;;              (message "Program source remain unchanged in server.")
-;;            (if target-file
-;;                (write-region response-data nil (abaplib-class--get-source-file class-name))
-;;              (let ((buffer (abaplib-class--buffer-get-create class-name)))
-;;                (set-buffer buffer)
-;;                (erase-buffer)
-;;                (goto-char (point-min))
-;;                (insert response-data)
-;;                (switch-to-buffer buffer)))
-;;            (message "Program source retrieved from server and overwrite local."))))
-;;      :parser 'abaplib-util-sourcecode-parser
-;;      :headers (list `("If-None-Match" . ,etag)
-;;                     '("Content-Type" . "plain/text")))))
+(defun abaplib-class--retrieve-source (source-name source-uri &optional etag)
+  "Retrieve program source from server"
+  (let* ((class-name abaplib-class--name)
+         (url (abaplib-get-project-api-url (concat abaplib-class--uri
+                                                   "/"
+                                                   source-uri))))
+    (abaplib--rest-api-call
+     url
+     (lambda (&rest rest)
+       (let ((response-data (cl-getf rest :data))
+             (status-code (request-response-status-code (cl-getf rest :response)))
+             (source-file (expand-file-name (concat source-name
+                                                    abaplib-class--source-file-suffix)
+                                            (abaplib-class--get-directory class-name))))
+         (if (eq status-code 304)
+             (message "Source remain unchanged in server.")
+           (write-region response-data nil source-file)
+           (message "Source retrieved from server and overwrite local."))))
+     :parser 'abaplib-util-sourcecode-parser
+     :headers (list `("If-None-Match" . ,etag)
+                    '("Content-Type" . "plain/text")))))
 
 (defun abaplib-class-do-retrieve(abap-object)
   "Retrieve source code"
@@ -179,8 +178,18 @@
   ;; 4. Open source buffer
   ;; (abaplib-class--init abap-object)
   (abaplib-class--init abap-object)
-  (abaplib-class--retrieve-properties-sync)
-  (let ((metadata-etag (abaplib-class--get-property 'metadata-etag)))))
+  (let ((previous-includes (abaplib-class--get-property 'includes)))
+    (abaplib-class--retrieve-properties) ;; Retrieve latest properties
+    (let ((includes (abaplib-class--get-property 'includes)))
+      (mapc (lambda (include)
+                (let ((include-type (car include))
+                      (source-uri (alist-get 'source-uri include))
+                      (etag (alist-get 'etag previous-includes)))
+                  (abaplib-class--retrieve-source include-type
+                                                  source-uri
+                                                  etag)
+                  t))
+              includes))))
 
 ;; (let ((source-etag (abaplib-class--get-property 'etag))
 ;;       (metadata-etag (abaplib-class--get-property 'metadata-etag))
@@ -209,7 +218,7 @@
 ;;   (abaplib-class--init abap-object)
 ;;   (let* ((source (buffer-substring-no-properties (point-min) (point-max)))
 ;;          (csrf-token (abaplib-core-get-csrf-token))
-;;          (lock-handle (abaplib-core-lock-sync abaplib-class--uri csrf-token)))
+;;          (lock-handle (abaplib-core-lock abaplib-class--uri csrf-token)))
 ;;     (abaplib--rest-api-call
 ;;      (abaplib-get-project-api-url abaplib-class--source-uri)
 ;;      (lambda (&rest rest)
@@ -240,7 +249,7 @@
                        (abaplib-class--get-property 'subtype class-name)))
          (uri-prefix abaplib-class--uri-prefix))
     (setq abaplib-class--name class-name)
-    (setq abaplib-class--uri (concat uri-prefix "/" class-name))))
+    (setq abaplib-class--uri (concat uri-prefix "/" class-name ))))
 
 
 (provide 'abaplib-class)

@@ -187,7 +187,7 @@
         ;; Create project directory
         (unless (file-directory-p project-dir)
           (make-directory project-dir))
-        (abaplib-upsert-project project-props)
+        (abaplib-upsert-project project-props-new)
         (abaplib-switch-project project-dir)))))
 
 (defun abaplib-project-init-propose (dir)
@@ -257,13 +257,20 @@
       (error "Project %s not bind to any server" project))
 
     (message "Login...")
+
+    ;; First loing with token to get cookie
+    (request
+     url
+     :sync t
+     :headers (list (cons "Authorization" login-token))
+     :params (list (cons "sap-client" sap-client)))
+
+    ;; Login with cookie
     (setq login-status
           (request-response-symbol-status
            (request
             url
-            :sync t
-            :headers (list (cons "Authorization" login-token))
-            :params (list (cons "sap-client" sap-client)))))
+            :sync t)))
 
     (unless (eq login-status 'success)
       (error "Connect to server Failed!"))
