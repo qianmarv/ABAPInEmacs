@@ -40,90 +40,109 @@
 
 (defconst abaplib-class--folder "Classes")
 
+
+
+(defun abaplib-class--get-root-directory ()
+  "Get directory for source code of classes"
+  (let* ((source-dir (expand-file-name abaplib-core--folder-S (abaplib-get-project-path)))
+         (classes-dir  (expand-file-name abaplib-class--folder source-dir)))
+    (unless (file-directory-p source-dir)
+      (make-directory source-dir))
+    (unless (file-directory-p classes-dir)
+      (make-directory class-dir))
+    classes-dir))
+
+(defun abaplib-class--get-directory(&optional class-name)
+  "Get directory for a specfic class"
+  (let* ((class-name (or class-name abaplib-class--name))
+         (class-dir (expand-file-name class-name (abaplib-class--get-root-directory))) )
+    (unless (file-directory-p class-dir)
+      (make-directory class-dir))
+    class-dir))
+
 ;; FIXME 1. Add programe name to metdata file
 ;;       2. verify program name while retrieve from cache
 (defun abaplib-class--get-properties (&optional class-name)
   " Get program properties"
   (let* ((class-name (or class-name
-                        abaplib-class--name))
-         (class-dir (expand-file-name class-name (abaplib-class--get-root-directory))))
-    (unless class-name
-      (error "Class is nil"))
-    (unless (file-directory-p class-dir)
-      (make-directory class-dir))
+                         abaplib-class--name
+                         (error "Class is unknown!")))
+         (class-dir (abaplib-class--get-directory class-name)))
     (unless abaplib-class--properties-cache
       (let ((prop-file (expand-file-name "properties.json" class-dir)))
         (when (file-exists-p prop-file)
           (setq abaplib-class--properties-cache (json-read-file prop-file)))))
     abaplib-class--properties-cache))
 
-(defun abaplib-class--get-root-directory ()
-  (let* ((source-dir (expand-file-name abaplib-core--folder-S (abaplib-get-project-path)))
-         (class-dir  (expand-file-name abaplib-class--folder source-dir )))
-    (unless (file-directory-p source-dir)
-      (make-directory source-dir))
-    (unless (file-directory-p class-dir)
-      (make-directory class-dir))))
-
 (defun abaplib-class--get-property (key &optional class-name)
   " Get program property by key"
-  (alist-get key (abaplib-class--get-properties class-name)))
+  (let ((class-name (or class-name
+                        abaplib-class--name
+                        (error "Class is unknown!"))))
+    (alist-get key (abaplib-class--get-properties class-name))))
 
-(defun abaplib-class--set-properties(properties)
-  " Get metadata from cache"
-  (let ((prop-file (expand-file-name "properties.json" class-dir)))
-    (setq abaplib-class--properties-cache properties)
-    (abaplib-util-jsonize-to-file (abaplib-class--get-properties) prop-file)))
+  (defun abaplib-class--set-properties(properties &optional class-name)
+    " Get metadata from cache"
+    (let* ((class-name (or class-name
+                           abaplib-class--name
+                           (error "Class is unknown!")))
+          (class-dir (abaplib-class--get-directory class-name))
+          (prop-file (expand-file-name "properties.json" class-dir)))
+      (abaplib-util-jsonize-to-file properties prop-file)
+      (setq abaplib-class--properties-cache properties)))
 
-;; (defun abaplib-class--set-property (key value)
-;;   "Set property"
-;;   (abaplib-class--set-properties
-;;    (abaplib-util-upsert-alists (abaplib-class--get-properties) (cons key value))))
+  ;; (defun abaplib-class--set-property (key value)
+  ;;   "Set property"
+  ;;   (abaplib-class--set-properties
+  ;;    (abaplib-util-upsert-alists (abaplib-class--get-properties) (cons key value))))
 
-(defun abaplib-class--parse-metadata (xml-node)
-  (let* ((adtcore-type (xml-get-attribute xml-node 'type))
-         (type-list (split-string adtcore-type "/"))
-         (type (car type-list))
-         (subtype (nth 1 type-list))
-         (name (xml-get-attribute xml-node 'name))
-         (description (xml-get-attribute xml-node 'description))
-         (version (xml-get-attribute xml-node 'version))
-         ;; (sourceUri (xml-get-attribute xml-node 'sourceUri))
-         ;; (links (xml-get-children xml-node 'link))
-         (package-node (car (xml-get-children xml-node 'packageRef)))
-         (package (xml-get-attribute package-node 'name))
-         (etag))
-    (dolist (link links)
-      (when (string= (xml-get-attribute link 'type) "text/plain")
-        (setq etag (xml-get-attribute link 'etag))
-        (return)))
-    `((name . ,name)
-      (description . ,description)
-      (type . ,type)
-      (subtype . ,subtype)
-      (version . ,version)
-      (source-uri . ,sourceUri)
-      (package . ,package)
-      (etag . ,etag))))
+  (defun abaplib-class--parse-metadata (xml-node)
+    (message "Parse metadata.")
+    (let* ((adtcore-type (xml-get-attribute xml-node 'type))
+           (type-list (split-string adtcore-type "/"))
+           (type (car type-list))
+           (subtype (nth 1 type-list))
+           (name (xml-get-attribute xml-node 'name))
+           (description (xml-get-attribute xml-node 'description))
+           (version (xml-get-attribute xml-node 'version))
+           (includes (xml-get-children xml-node 'include))
+           (package-node (car (xml-get-children xml-node 'packageRef)))
+           (package (xml-get-attribute package-node 'name))
+           (etag))
+      (dolist (include includes)
+        (when (string= (xml-get-attribute link 'type) "text/plain")
+          (setq etag (xml-get-attribute link 'etag))
+          (return)))
+      `((name . ,name)
+        (description . ,description)
+        (type . ,type)
+        (subtype . ,subtype)
+        (version . ,version)
+        ;; (source-uri . ,sourceUri)
+        (package . ,package)
+        (etag . ,etag))))
 
 (defun abaplib-class--retrieve-properties-sync ()
   "Retrieve class metadata from server"
   (let* ((etag (abaplib-class--get-property 'metadata-etag))
          (class-name abaplib-class--name)
          (url (abaplib-get-project-api-url abaplib-class--uri))
-         (response (abaplib--rest-api-call url
-                                           nil
-                                           :parser 'abaplib-util-xml-parser
-                                           :headers (list `("If-None-Match" . ,etag))))
-         (data (request-response-data response))
-         (status-code (request-response-status-code response))
-         (metadata-etag (request-response-header response "ETag")))
+         (data (abaplib--rest-api-call url
+                                       nil
+                                       :parser 'abaplib-util-xml-parser
+                                       ;; :headers (list `("If-None-Match" . ,etag))
+                                       )))
+    ;; (data (request-response-data response))
+    ;; (status-code (request-response-status-code response))
+    ;; (metadata-etag (request-response-header response "ETag")))
 
-    (unless (eq status-code 304) ;; Not modified
-      (abaplib-class--set-properties (append
-                                      (abaplib-class--parse-metadata response-data)
-                                      (list `(metadata-etag . ,metadata-etag))))
-      (message "class metadata refreshed."))))
+    (abaplib-class--set-properties (abaplib-class--parse-metadata data))
+    ;; (unless (eq status-code 304) ;; Not modified
+    ;; (abaplib-class--set-properties
+    ;; (append
+    ;;                                (abaplib-class--parse-metadata data)
+    ;;                                (list `(metadata-etag . ,metadata-etag))))
+    (message "class metadata refreshed.")))
 
 ;; (defun abaplib-class--buffer-get-create (class-name)
 ;;   (get-buffer-create (format "*(Server) %s *" class-name)))

@@ -46,6 +46,12 @@
   :type 'boolean
   :group 'abap)
 
+(defcustom abap-login-timeout 1800
+  "login timeout (seconds)"
+  :type 'number
+  :group 'abap)
+
+
 (defcustom abap-search-list-max-result 50
   "Object query list maximum result"
   :type 'number
@@ -60,6 +66,9 @@
 
 (defvar abaplib--sap-client-cache nil
   "ABAP system logon client")
+
+(defvar abaplib--login-last-time nil
+  "Last login timestamp")
 
 (defconst abaplib-core--not-a-type "ZZZZ")
 
@@ -240,10 +249,14 @@
 
 (defun abaplib-auth-login-with-token(project login-token sap-client)
   "Login into ABAP Server with token"
-  (let ((url (abaplib-get-project-api-url abaplib-core--uri-login))
+  (let ((url ;; "http://ldcier9.wdf.sap.corp:50000/sap/bc/adt/core/discovery"
+         (abaplib-get-project-api-url abaplib-core--uri-login))
+        (server (abaplib-project-get-property 'server project))
         (login-status))
     (unless server
       (error "Project %s not bind to any server" project))
+
+    (message "Login...")
     (setq login-status
           (request-response-symbol-status
            (request
@@ -255,6 +268,8 @@
     (unless (eq login-status 'success)
       (error "Connect to server Failed!"))
 
+    ;; Login succeed
+    (setq abaplib--login-last-time (time-to-seconds (current-time)))
     (when abap-save-login-credential
       (let ((login-credential (cons 'login_token login-token))
             (sap-client       (cons 'sap_client sap-client)))
@@ -338,6 +353,13 @@
          (type    (or (cl-getf args :type) "GET"))
          (params (cl-getf args :params)))
 
+    ;; Verify whether need to login with token
+    ;; (let ((now (time-to-seconds (current-time))))
+    ;;   (when (or (not abaplib--login-last-time)
+    ;;             (> (- now abaplib--login-last-time) abap-login-timeout))
+    ;;     (abaplib-auth-login-with-token abaplib--current-project
+    ;;                                    login-token
+    ;;                                    (abaplib-get-sap-client))))
     ;; For method like POST, PUT, DELETE, required to get CSRF Token first
     ;; (message "headers:= %s" headers)
     (if (string= type "GET")
