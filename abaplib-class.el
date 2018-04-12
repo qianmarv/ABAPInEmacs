@@ -76,68 +76,73 @@
           (setq abaplib-class--properties-cache (json-read-file prop-file)))))
     abaplib-class--properties-cache))
 
-(defun abaplib-class--get-property (key &optional class-name)
+(defun abaplib-class--get-property (key include &optional class-name)
   " Get program property by key"
   (let ((class-name (or class-name
                         abaplib-class--name
-                        (error "Class is unknown!"))))
-    (alist-get key (abaplib-class--get-properties class-name))))
+                        (error "Class is unknown!")))
+        (properties (abaplib-class--get-properties class-name)))
+    (when include
+      (setq properties (alist-get include
+                                  (alist-get 'includes properties))))
+    (alist-get key properties)))
 
-  (defun abaplib-class--set-properties(properties &optional class-name)
-    " Get metadata from cache"
-    (let* ((class-name (or class-name
-                           abaplib-class--name
-                           (error "Class is unknown!")))
-          (class-dir (abaplib-class--get-directory class-name))
-          (prop-file (expand-file-name ".properties.json" class-dir)))
-      (abaplib-util-jsonize-to-file properties prop-file)
-      (setq abaplib-class--properties-cache properties)))
 
-  ;; (defun abaplib-class--set-property (key value)
-  ;;   "Set property"
-  ;;   (abaplib-class--set-properties
-  ;;    (abaplib-util-upsert-alists (abaplib-class--get-properties) (cons key value))))
+(defun abaplib-class--set-properties(properties &optional class-name)
+  " Get metadata from cache"
+  (let* ((class-name (or class-name
+                         abaplib-class--name
+                         (error "Class is unknown!")))
+         (class-dir (abaplib-class--get-directory class-name))
+         (prop-file (expand-file-name ".properties.json" class-dir)))
+    (abaplib-util-jsonize-to-file properties prop-file)
+    (setq abaplib-class--properties-cache properties)))
 
-  (defun abaplib-class--parse-metadata (xml-node)
-    ;; (message "Parse metadata.")
-    (let* ((adtcore-type (xml-get-attribute xml-node 'type))
-           (type-list (split-string adtcore-type "/"))
-           (type (car type-list))
-           (subtype (nth 1 type-list))
-           (name (xml-get-attribute xml-node 'name))
-           (description (xml-get-attribute xml-node 'description))
-           (version (xml-get-attribute xml-node 'version))
-           (package-node (car (xml-get-children xml-node 'packageRef)))
-           (package (xml-get-attribute package-node 'name))
-           (includes-node (xml-get-children xml-node 'include))
-           (includes (mapcar
-                      (lambda (include)
-                        (let ((version (xml-get-attribute include 'version))
-                              (source-uri (xml-get-attribute include 'sourceUri))
-                              (include-type (xml-get-attribute include 'includeType))
-                              (type (xml-get-attribute include 'type))
-                              (links (xml-get-children include 'link))
-                              (etag))
-                          (dolist (link links)
-                            (when (string= (xml-get-attribute link 'type) "text/plain")
-                              (setq etag (xml-get-attribute link 'etag))
-                              (return)))
-                          (cons include-type `((version . ,version)
-                                               (source-uri . ,source-uri)
-                                               (type . ,type)
-                                               (etag . ,etag)))))
-                      includes-node)))
-      `((name . ,name)
-        (description . ,description)
-        (type . ,type)
-        (subtype . ,subtype)
-        (version . ,version)
-        (package . ,package)
-        (includes . ,includes))))
+;; (defun abaplib-class--set-property (key value)
+;;   "Set property"
+;;   (abaplib-class--set-properties
+;;    (abaplib-util-upsert-alists (abaplib-class--get-properties) (cons key value))))
+
+(defun abaplib-class--parse-metadata (xml-node)
+  ;; (message "Parse metadata.")
+  (let* ((adtcore-type (xml-get-attribute xml-node 'type))
+         (type-list (split-string adtcore-type "/"))
+         (type (car type-list))
+         (subtype (nth 1 type-list))
+         (name (xml-get-attribute xml-node 'name))
+         (description (xml-get-attribute xml-node 'description))
+         (version (xml-get-attribute xml-node 'version))
+         (package-node (car (xml-get-children xml-node 'packageRef)))
+         (package (xml-get-attribute package-node 'name))
+         (includes-node (xml-get-children xml-node 'include))
+         (includes (mapcar
+                    (lambda (include)
+                      (let ((version (xml-get-attribute include 'version))
+                            (source-uri (xml-get-attribute include 'sourceUri))
+                            (include-type (xml-get-attribute include 'includeType))
+                            (type (xml-get-attribute include 'type))
+                            (links (xml-get-children include 'link))
+                            (etag))
+                        (dolist (link links)
+                          (when (string= (xml-get-attribute link 'type) "text/plain")
+                            (setq etag (xml-get-attribute link 'etag))
+                            (return)))
+                        (cons include-type `((version . ,version)
+                                             (source-uri . ,source-uri)
+                                             (type . ,type)
+                                             (etag . ,etag)))))
+                    includes-node)))
+    `((name . ,name)
+      (description . ,description)
+      (type . ,type)
+      (subtype . ,subtype)
+      (version . ,version)
+      (package . ,package)
+      (includes . ,includes))))
 
 (defun abaplib-class--retrieve-properties ()
   "Retrieve class metadata from server"
-  (let* ((etag (abaplib-class--get-property 'metadata-etag))
+  (let* ((etag (abaplib-class--get-property 'metadata-etag nil))
          (class-name abaplib-class--name)
          (url (abaplib-get-project-api-url abaplib-class--uri))
          (data (abaplib--rest-api-call url
@@ -150,6 +155,7 @@
 
 (defun abaplib-class--retrieve-source (source-name source-uri &optional etag)
   "Retrieve program source from server"
+  (message "Etag: = %s" etag)
   (let* ((class-name abaplib-class--name)
          (url (abaplib-get-project-api-url (concat abaplib-class--uri
                                                    "/"
@@ -172,43 +178,35 @@
 
 (defun abaplib-class-do-retrieve(abap-object)
   "Retrieve source code"
-  ;; 1. Retrieve/refresh metadata in synchronouse
-  ;; 2. Get source uri
-  ;; 3. Retrieve source in asynchronouse
-  ;; 4. Open source buffer
-  ;; (abaplib-class--init abap-object)
   (abaplib-class--init abap-object)
-  (let ((previous-includes (abaplib-class--get-property 'includes)))
-    (abaplib-class--retrieve-properties) ;; Retrieve latest properties
-    (let ((includes (abaplib-class--get-property 'includes)))
+  (let* ((pre-includes (alist-get 'includes (abaplib-class--get-properties)))
+         (curr-properties (abaplib-class--retrieve-properties))
+         (includes (alist-get 'includes curr-properties)))
+     ;; Retrieve latest properties
       (mapc (lambda (include)
-                (let ((include-type (car include))
-                      (source-uri (alist-get 'source-uri include))
-                      (etag (alist-get 'etag previous-includes)))
-                  (abaplib-class--retrieve-source include-type
-                                                  source-uri
-                                                  etag)
-                  t))
-              includes))))
+              (let* ((include-type (car include))
+                     (pre-include (alist-get (intern include-type) pre-includes))
+                     (source-uri (alist-get 'source-uri include))
+                     (pre-etag (alist-get 'etag pre-include)))
+                (abaplib-class--retrieve-source include-type
+                                                source-uri
+                                                pre-etag)
+                t))
+            includes)))
 
-;; (let ((source-etag (abaplib-class--get-property 'etag))
-;;       (metadata-etag (abaplib-class--get-property 'metadata-etag))
-;;       (source-file (abaplib-class--get-source-file abaplib-class--name)))
-;;   (abaplib-class--retrieve-properties metadata-etag)
-;;   (abaplib-class--retrieve-source source-etag source-file))
 
-;; (defun abaplib-class-do-check(abap-object)
-;;   "Check syntax for program source
-;;   TODO check whether source changed since last retrieved from server
-;;        Not necessary to send the source code to server if no change."
-;;   (abaplib-class--init abap-object)
-;;   (let ((version (abaplib-class--get-property 'version))
-;;         (adtcore-uri abaplib-class--uri)
-;;         (chkrun-uri  abaplib-class--source-uri)
-;;         (chkrun-content (base64-encode-string (buffer-substring-no-properties
-;;                                                (point-min)
-;;                                                (point-max)))))
-;;     (abaplib-core-check-post version adtcore-uri chkrun-uri chkrun-content)))
+(defun abaplib-class-do-check(abap-object)
+  "Check syntax for program source
+  TODO check whether source changed since last retrieved from server
+       Not necessary to send the source code to server if no change."
+  (abaplib-class--init abap-object)
+  (let ((version (abaplib-class--get-property 'version))
+        (adtcore-uri abaplib-class--uri)
+        (chkrun-uri  abaplib-class--source-uri)
+        (chkrun-content (base64-encode-string (buffer-substring-no-properties
+                                               (point-min)
+                                               (point-max)))))
+    (abaplib-core-check-post version adtcore-uri chkrun-uri chkrun-content)))
 
 ;; (defun abaplib-class-do-submit(abap-object)
 ;;   "Submit source to server
