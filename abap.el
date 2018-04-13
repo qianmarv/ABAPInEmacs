@@ -104,17 +104,17 @@
   (interactive
    (let* ((project (abap-get-current-project))
           (query-string (read-string "Enter Search String: "))
-          (search-result))
-     (setq search-result (abaplib-core-service-dispatch
-                           'search
-                           `((name . ,query-string)
-                             (type . ,abaplib-core--not-a-type))))
-     (let* ((selected-object (split-string (completing-read "Maching Items: "
-                                                            search-result) " " t))
+          (search-result (abaplib-core-do-search query-string))
+          (completing-list (mapcar (lambda(object-node)
+                                     (xml-get-attribute object-node 'name))
+                                   search-result)))
+
+     (let* ((selected-item (completing-read "Maching Items: " completing-list))
             (adtcore-type (split-string (car selected-object) "/"))
             (object-type (car adtcore-type))
             (object-subtype (nth 1 adtcore-type))
             (object-name (nth 1 selected-object)))
+       (message "selected object name: %s" object-name)
        (abap-retrieve-source (list `(name . ,object-name)
                                    `(type . ,object-type)
                                    `(subtype . ,object-subtype)))
@@ -130,14 +130,14 @@
   "Retrieve source"
   (interactive)
   (let ((abap-object (or abap-object
-                        (abap-get-abap-object-from-file))))
+                         (abap-get-abap-object-from-file))))
     (abaplib-core-service-dispatch 'retrieve abap-object)))
 
 (defun abap-check-source (&optional abap-object)
   "Check source"
   (interactive)
   (let ((abap-object (or abap-object
-                        (abap-get-abap-object-from-file))))
+                         (abap-get-abap-object-from-file))))
     (abaplib-core-service-dispatch 'check abap-object)))
 
 
@@ -145,14 +145,14 @@
   "Submit source"
   (interactive)
   (let ((abap-object (or abap-object
-                        (abap-get-abap-object-from-file))))
+                         (abap-get-abap-object-from-file))))
     (abaplib-core-service-dispatch 'submit abap-object)))
 
 (defun abap-activate-source (&optional abap-object)
   "Activate source"
   (interactive)
   (let ((abap-object (or abap-object
-                        (abap-get-abap-object-from-file))))
+                         (abap-get-abap-object-from-file))))
     (abaplib-core-service-dispatch 'activate abap-object)))
 
 (defun abap-get-abap-object-from-file()

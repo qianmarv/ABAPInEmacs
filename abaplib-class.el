@@ -117,20 +117,22 @@
          (includes-node (xml-get-children xml-node 'include))
          (includes (mapcar
                     (lambda (include)
-                      (let ((version (xml-get-attribute include 'version))
-                            (source-uri (xml-get-attribute include 'sourceUri))
-                            (include-type (xml-get-attribute include 'includeType))
-                            (type (xml-get-attribute include 'type))
-                            (links (xml-get-children include 'link))
-                            (etag))
+                      (let* ((version (xml-get-attribute include 'version))
+                             (source-uri (xml-get-attribute include 'sourceUri))
+                             (include-type (xml-get-attribute include 'includeType))
+                             (type (xml-get-attribute include 'type))
+                             (links (xml-get-children include 'link))
+                             (file-name (concat include-type ".clas.abap"))
+                             (etag))
                         (dolist (link links)
                           (when (string= (xml-get-attribute link 'type) "text/plain")
                             (setq etag (xml-get-attribute link 'etag))
                             (return)))
-                        (cons include-type `((version . ,version)
-                                             (source-uri . ,source-uri)
-                                             (type . ,type)
-                                             (etag . ,etag)))))
+                        (cons file-name `((version . ,version)
+                                          (source-uri . ,source-uri)
+                                          (include-type . ,include-type)
+                                          (type . ,type)
+                                          (etag . ,etag)))))
                     includes-node)))
     `((name . ,name)
       (description . ,description)
@@ -138,7 +140,7 @@
       (subtype . ,subtype)
       (version . ,version)
       (package . ,package)
-      (includes . ,includes))))
+      (sources . ,includes))))
 
 (defun abaplib-class--retrieve-properties ()
   "Retrieve class metadata from server"
@@ -182,17 +184,17 @@
   (let* ((pre-includes (alist-get 'includes (abaplib-class--get-properties)))
          (curr-properties (abaplib-class--retrieve-properties))
          (includes (alist-get 'includes curr-properties)))
-     ;; Retrieve latest properties
-      (mapc (lambda (include)
-              (let* ((include-type (car include))
-                     (pre-include (alist-get (intern include-type) pre-includes))
-                     (source-uri (alist-get 'source-uri include))
-                     (pre-etag (alist-get 'etag pre-include)))
-                (abaplib-class--retrieve-source include-type
-                                                source-uri
-                                                pre-etag)
-                t))
-            includes)))
+    ;; Retrieve latest properties
+    (mapc (lambda (include)
+            (let* ((include-type (car include))
+                   (pre-include (alist-get (intern include-type) pre-includes))
+                   (source-uri (alist-get 'source-uri include))
+                   (pre-etag (alist-get 'etag pre-include)))
+              (abaplib-class--retrieve-source include-type
+                                              source-uri
+                                              pre-etag)
+              t))
+          includes)))
 
 
 (defun abaplib-class-do-check(abap-object)
@@ -241,6 +243,7 @@
 
 (defun abaplib-class--init (abap-object)
   ;; (message "called abaplib-class--init with: %s" abap-object)
+  (message "abap-object: %s" abap-object)
   (let* ((class-name (alist-get 'name abap-object))
          (type (alist-get 'type abap-object))
          (sub-type (or (alist-get 'subtype abap-object)

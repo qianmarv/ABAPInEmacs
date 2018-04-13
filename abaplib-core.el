@@ -52,7 +52,7 @@
   :group 'abap)
 
 
-(defcustom abap-search-list-max-result 50
+(defcustom abap-search-list-max-results 51
   "Object query list maximum result"
   :type 'number
   :group 'abap)
@@ -128,7 +128,7 @@
 (defun abaplib-get-ws-describe-file()
   "Get workspace description file"
   (let* ((config-dir (expand-file-name ".abap" abap-workspace-dir))
-         (describe-file (expand-file-name "projects.json" config-dir)))
+         (describe-file (expand-file-name ".projects.json" config-dir)))
     (unless (file-directory-p config-dir) ;; Initialize for first time
       (make-directory config-dir))
     (unless (file-exists-p describe-file)
@@ -408,27 +408,27 @@
 ;; Services Implementation - Search ABAP Object
 ;;==============================================================================
 
-(defun abaplib-core-do-search (abap-object)
+(defun abaplib-core-do-search (query-string)
   "Search ABAP objects in server in synchronouse call"
   (let* ((url (abaplib-get-project-api-url "/sap/bc/adt/repository/informationsystem/search"))
-         (query-string (alist-get 'name abap-object))
          (params `((operation . "quickSearch")
-                   (query . ,(concat "*" query-string "*"))
-                   (maxResult . ,abap-search-list-max-result)))
+                   (query . ,(concat query-string "*"))
+                   (maxResults . ,abap-search-list-max-results)))
          (data (abaplib--rest-api-call url
                                        nil
                                        :params params
                                        :parser 'abaplib-util-xml-parser))
          (object-list (xml-get-children data 'objectReference)))
-    (mapcar (lambda (obj)
-              (let* (
-                     (type        (xml-get-attribute obj 'type))
-                     (name        (xml-get-attribute obj 'name))
-                     ;; (packageName (xml-get-attribute obj 'packageName))
-                     (description (xml-get-attribute obj 'description))
-                     )
-                (list (format "%-8s%-31s%s" type name description))))
-            object-list)))
+    ;; (mapcar (lambda (obj)
+    ;;           (let* (
+    ;;                  (type        (xml-get-attribute obj 'type))
+    ;;                  (name        (xml-get-attribute obj 'name))
+    ;;                  ;; (packageName (xml-get-attribute obj 'packageName))
+    ;;                  (description (xml-get-attribute obj 'description))
+    ;;                  )
+    ;;             (list (format "%-8s%-31s%s" type name description))))
+    ;;         object-list)
+    ))
 
 (defun abaplib-core--raise-fallback-error (abap-object)
   (let ((object-type (alist-get 'type abap-object)))
@@ -662,6 +662,17 @@
      :params '((method . activate)
                (preauditRequested . true))
      :data post-body)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defun abaplib-core--retrieve-properties ()
+  "Retrieve class metadata from server"
+  (let* ((etag (abaplib-class--get-property 'metadata-etag nil))
+         (class-name abaplib-class--name)
+         (url (abaplib-get-project-api-url abaplib-class--uri))
+         (data (abaplib--rest-api-call url
+                                       nil
+                                       :parser 'abaplib-util-xml-parser)))
+    (abaplib-class--set-properties (abaplib-class--parse-metadata data))))
 
 (provide 'abaplib-core)
 ;;; abaplib.el ends here

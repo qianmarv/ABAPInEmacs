@@ -26,7 +26,7 @@
 
 (defun abaplib-util-current-dir ()
   (if buffer-file-name
-      (file-name-directory buffer-file-name)
+      (file-name-directory buffer-file-name
     dired-directory))
 
 (defun abaplib-util-get-string-from-file (filePath)
