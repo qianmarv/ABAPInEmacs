@@ -101,30 +101,36 @@
 
 (defun abap-search-object ()
   "Retrieve ABAP objects"
-  (interactive
-   (let* ((project (abap-get-current-project))
-          (query-string (read-string "Enter Search String: "))
-          (search-result (abaplib-core-do-search query-string))
-          (completing-list (mapcar (lambda(object-node)
-                                     (xml-get-attribute object-node 'name))
-                                   search-result)))
-
-     (let* ((selected-item (completing-read "Maching Items: " completing-list))
-            (adtcore-type (split-string (car selected-object) "/"))
-            (object-type (car adtcore-type))
-            (object-subtype (nth 1 adtcore-type))
-            (object-name (nth 1 selected-object)))
-       (message "selected object name: %s" object-name)
-       (abap-retrieve-source (list `(name . ,object-name)
-                                   `(type . ,object-type)
-                                   `(subtype . ,object-subtype)))
-       nil
-       ;; FIXME Debugger entered--Lisp error:
-       ;;      (wrong-type-argument sequencep #<buffer RTC_CT.prog.abap>)
-       ;; (let ((source-file (abaplib-program--get-source-file object-name)))
-       ;;   (unless (string= (buffer-file-name) source-file)
-       ;;     (switch-to-buffer (find-file source-file))))
-       ))))
+  (interactive)
+  (let* ((project (abap-get-current-project))
+         (query-string (read-string "Enter Search String: "))
+         (search-result (abaplib-core-do-search query-string))
+         ;; (completing-list (mapcar (lambda(object-node)
+         ;;                            (let ((name (xml-get-attribute object-node 'name))
+         ;;                                  (type (xml-get-attribute object-node 'type))
+         ;;                                  (description (xml-get-attribute object-node
+         ;;                                                                  'description)))
+         ;;                              (format "%-8s %-30s %s" type name description)))
+         ;;                          search-result))
+         ;; (selected-item (split-string (completing-read "Maching Items: " completing-list)
+         ;; " " t))
+         ;; (item-type (car selected-item))
+         ;; (item-name (nth 1 selecetd-item))
+         (completing-list)
+         (index 1))
+    (dolist (object-node search-result)
+      (let ((name (xml-get-attribute object-node 'name))
+            (description (xml-get-attribute object-node 'description)))
+        (setq completing-list
+              (append  completing-list
+                       `((,(format "%-3s %-30s %s" index name description)))))
+        (setq index (+ index 1))))
+    (let* ((selected-item (completing-read "Maching Items: " completing-list))
+           (selected-index (string-to-number (car (split-string selected-item " " t))))
+           (selected-object (nth (- selected-index 1) search-result))
+           (object-uri (xml-get-attribute selected-object 'uri))
+           (object-type (xml-get-attribute selected-object 'type)))
+      (message "selected: %s" object-uri))))
 
 (defun abap-retrieve-source (&optional abap-object)
   "Retrieve source"

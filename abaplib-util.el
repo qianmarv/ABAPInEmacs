@@ -24,10 +24,12 @@
 
 ;;; Code:
 
+(require 'xml)
+
 (defun abaplib-util-current-dir ()
   (if buffer-file-name
       (file-name-directory buffer-file-name
-    dired-directory))
+    dired-directory)))
 
 (defun abaplib-util-get-string-from-file (filePath)
   "Return filePath's file content."
@@ -40,8 +42,7 @@
     (goto-char (point-min))
     (while (re-search-forward "\r" nil t)
       (replace-match ""))
-    (buffer-string))
-  )
+    (buffer-string)))
 
 (defun abaplib-util-goto-position (line column)
   (goto-char (point-min))

@@ -128,7 +128,7 @@
 (defun abaplib-get-ws-describe-file()
   "Get workspace description file"
   (let* ((config-dir (expand-file-name ".abap" abap-workspace-dir))
-         (describe-file (expand-file-name ".projects.json" config-dir)))
+         (describe-file (expand-file-name "projects.json" config-dir)))
     (unless (file-directory-p config-dir) ;; Initialize for first time
       (make-directory config-dir))
     (unless (file-exists-p describe-file)
@@ -427,8 +427,7 @@
     ;;                  (description (xml-get-attribute obj 'description))
     ;;                  )
     ;;             (list (format "%-8s%-31s%s" type name description))))
-    ;;         object-list)
-    ))
+    object-list))
 
 (defun abaplib-core--raise-fallback-error (abap-object)
   (let ((object-type (alist-get 'type abap-object)))
