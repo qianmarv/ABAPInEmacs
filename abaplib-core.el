@@ -663,15 +663,56 @@
      :data post-body)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defun abaplib-core--retrieve-properties ()
+;; 1) Handle Metadata
+;; 2) Handle Source
+(defun abaplib-get-category-path(type)
+  (let* ((source-code-dir "Source Code Library")
+         (core-data-source-dir "Core Data Server")
+         (dir (case (intern type)
+                ('CLAS source-code-dir)
+                ('PROG source-code-dir)))
+         (path (expand-file-name dir abaplib-core-project)))
+    ))
+(defun abaplib-core-get-directory (type)
+  (let* ((type-list (split-string type "/"))
+         (major-type (intern (car type-list)))
+         (minor-type (intern (nth 1 type-list))))
+    (case major-type
+      ('CLAS (expand-file-name "Class" )))))
+
+(defun abaplib-core--handle-metadata (metadata type)
+  (let* ((major-type (substring type 0 4))
+         (impl-func (concat "abaplib-" major-type "-metadata-parser")))
+    (apply impl-func metadata)))
+
+(defun abaplib-core--handle-source (properties type)
+  (let* ((major-type (substring type 0 4))
+         (impl-func (concat "abaplib-" major-type "-source-retriever")))
+    (apply impl-func properties)))
+
+
+(defun abaplib-core-retrieve-object (uri type)
+  " Retrieve ABAP object"
+  ;; 1. Retrieve metadata from uri -- common
+  ;; 2. Parse metadata -- specific
+  ;; 3. Save properties & Old properties -- common
+  ;; 4. Parse source part --> source type/uri/etag -- specific
+  ;; 5. Retrieve source
+  (let* ((url (abaplib-get-project-api-url uri))
+         (metadata (abaplib--rest-api-call url
+                                           nil
+                                           :parser 'abaplib-util-xml-parser))
+         (properties (abaplib-core--handle-metadata metadata type)))
+    (abaplib-core--handle-source properties)))
+
+(defun abaplib-core--retrieve-properties (uri type)
   "Retrieve class metadata from server"
-  (let* ((etag (abaplib-class--get-property 'metadata-etag nil))
-         (class-name abaplib-class--name)
-         (url (abaplib-get-project-api-url abaplib-class--uri))
+  (let* ((url (abaplib-get-project-api-url uri))
          (data (abaplib--rest-api-call url
                                        nil
                                        :parser 'abaplib-util-xml-parser)))
     (abaplib-class--set-properties (abaplib-class--parse-metadata data))))
+
 
 (provide 'abaplib-core)
 ;;; abaplib.el ends here

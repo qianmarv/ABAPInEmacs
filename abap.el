@@ -130,7 +130,8 @@
            (selected-object (nth (- selected-index 1) search-result))
            (object-uri (xml-get-attribute selected-object 'uri))
            (object-type (xml-get-attribute selected-object 'type)))
-      (message "selected: %s" object-uri))))
+      ;; (message "selected: %s" object-uri)
+      (abaplib-core-retrieve-objet object-uri object-type))))
 
 (defun abap-retrieve-source (&optional abap-object)
   "Retrieve source"
