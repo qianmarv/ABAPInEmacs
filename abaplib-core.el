@@ -119,8 +119,9 @@
 
 (defconst abaplib-core--uri-login "/sap/bc/adt/core/discovery")
 
-(defconst abaplib-core--folder-S "Source Code Library")
-(defconst abaplib-core--folder-C "Core Data Services")
+(defconst abaplib-core--dir-S "Source Code Library")
+
+(defconst abaplib-core--dir-C "Core Data Services")
 
 ;;==============================================================================
 ;; Project
@@ -665,31 +666,63 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; 1) Handle Metadata
 ;; 2) Handle Source
-(defun abaplib-get-category-path(type)
-  (let* ((source-code-dir "Source Code Library")
-         (core-data-source-dir "Core Data Server")
-         (dir (case (intern type)
-                ('CLAS source-code-dir)
-                ('PROG source-code-dir)))
-         (path (expand-file-name dir abaplib-core-project)))
-    ))
-(defun abaplib-core-get-directory (type)
+
+(defun abaplib-core-get-path (type)
   (let* ((type-list (split-string type "/"))
          (major-type (intern (car type-list)))
-         (minor-type (intern (nth 1 type-list))))
+         (minor-type (intern (nth 1 type-list)))
+         (parent-directory)
+         (sub-directory))
     (case major-type
-      ('CLAS (expand-file-name "Class" )))))
+      ('CLAS (progn
+               (setq parent-directory abaplib-core--dir-S)
+               (setq sub-directory    "Classes" )))
+      ('PROG (progn
+               (setq parent-path abaplib-core--dir-S)
+               (setq sub-directory "Programs" ))))
 
-(defun abaplib-core--handle-metadata (metadata type)
+    (let* ((parent-path (expand-file-name parent-directory
+                                          (abaplib-get-project-path)))
+           (type-path (expand-file-name sub-directory parent-path)))
+      (unless (file-exists-p parent-path)
+        (make-directory parent-path))
+      (unless (file-exists-p type-path)
+        (make-directory type-path)))))
+
+(defun abaplib-core--retrieve-metadata (uri type)
   (let* ((major-type (substring type 0 4))
-         (impl-func (concat "abaplib-" major-type "-metadata-parser")))
-    (apply impl-func metadata)))
+         (url (abaplib-get-project-api-url uri))
+         (metadata-raw (abaplib--rest-api-call url
+                                           nil
+                                           :parser 'abaplib-util-xml-parser))
+         (impl-func (concat "abaplib-" major-type "-metadata-parser"))
+         (properties (apply impl-func metadata)))
+    properties))
 
-(defun abaplib-core--handle-source (properties type)
+(defun abaplib-core--retrieve-source (uri etag source-file &target-buffer)
+  (abaplib--rest-api-call
+   url
+   (lambda (&rest rest)
+     (let ((response-data (cl-getf rest :data))
+           (status-code (request-response-status-code (cl-getf rest :response)))
+           (source-file (expand-file-name (concat source-name
+                                                  abaplib-class--source-file-suffix)
+                                          (abaplib-class--get-directory class-name))))
+       (if (eq status-code 304)
+           (message "Source remain unchanged in server.")
+         (write-region response-data nil source-file)
+         (message "Source retrieved from server and overwrite local."))))
+   :parser 'abaplib-util-sourcecode-parser
+   :headers (list `("If-None-Match" . ,etag)
+                  '("Content-Type" . "plain/text"))))
+ 
+(defun abaplib-core--retrieve-sources (properties type &optional source-file target-buffer)
   (let* ((major-type (substring type 0 4))
-         (impl-func (concat "abaplib-" major-type "-source-retriever")))
-    (apply impl-func properties)))
-
+         (sources (alist-get 'sources properties)))
+    (when source-file
+      (let* ((source-prop (alist-get (intern source-file) sources))
+             (source-uri (alist-get 'source-uri source-prop)))
+        ))))
 
 (defun abaplib-core-retrieve-object (uri type)
   " Retrieve ABAP object"
@@ -698,12 +731,8 @@
   ;; 3. Save properties & Old properties -- common
   ;; 4. Parse source part --> source type/uri/etag -- specific
   ;; 5. Retrieve source
-  (let* ((url (abaplib-get-project-api-url uri))
-         (metadata (abaplib--rest-api-call url
-                                           nil
-                                           :parser 'abaplib-util-xml-parser))
-         (properties (abaplib-core--handle-metadata metadata type)))
-    (abaplib-core--handle-source properties)))
+  (let* ((metadata-props (abaplib-core--retrieve-metadata uri type)))
+    (abaplib-core--retrieve-source properties type)))
 
 (defun abaplib-core--retrieve-properties (uri type)
   "Retrieve class metadata from server"
