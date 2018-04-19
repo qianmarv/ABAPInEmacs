@@ -27,9 +27,8 @@
 (require 'xml)
 
 (defun abaplib-util-current-dir ()
-  (if buffer-file-name
-      (file-name-directory buffer-file-name
-    dired-directory)))
+  (when buffer-file-name
+      (file-name-directory buffer-file-name)))
 
 (defun abaplib-util-get-string-from-file (filePath)
   "Return filePath's file content."

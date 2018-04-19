@@ -72,6 +72,8 @@
 
 (defconst abaplib-core--not-a-type "ZZZZ")
 
+(defconst abaplib-core-property-file ".property.json")
+
 (defconst abaplib-core--supported-type  '(PROG CLAS DCLS DDLS ZZZZ)
   "Supported ABAP Development Object Type")
 
@@ -690,7 +692,8 @@
         (make-directory type-path)))))
 
 (defun abaplib-core--retrieve-metadata (uri type)
-  (let* ((major-type (substring type 0 4))
+  (let* ((property-file (abaplib-core-get-path type))
+         (major-type (substring type 0 4))
          (url (abaplib-get-project-api-url uri))
          (metadata-raw (abaplib--rest-api-call url
                                            nil

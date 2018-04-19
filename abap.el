@@ -127,11 +127,10 @@
         (setq index (+ index 1))))
     (let* ((selected-item (completing-read "Maching Items: " completing-list))
            (selected-index (string-to-number (car (split-string selected-item " " t))))
-           (selected-object (nth (- selected-index 1) search-result))
-           (object-uri (xml-get-attribute selected-object 'uri))
-           (object-type (xml-get-attribute selected-object 'type)))
-      ;; (message "selected: %s" object-uri)
-      (abaplib-core-retrieve-objet object-uri object-type))))
+           (selected-object (nth (- selected-index 1) search-result)))
+      (abap-retrieve-source `((name . ,(xml-get-attribute selected-object 'name))
+                              (uri  . ,(xml-get-attribute selected-object 'uri))
+                              (type . ,(xml-get-attribute selected-object 'type)))))))
 
 (defun abap-retrieve-source (&optional abap-object)
   "Retrieve source"
@@ -163,11 +162,21 @@
     (abaplib-core-service-dispatch 'activate abap-object)))
 
 (defun abap-get-abap-object-from-file()
-  (let* ((file-name (file-name-nondirectory (buffer-file-name)))
-         (components  (reverse (split-string file-name "\\." t)))
-         ;; (object-name (car (last components)))
-         (object-name (car (reverse (split-string (abaplib-util-current-dir) "/" t))))
-         (object-type (upcase (nth 1 components))))
+  (let ((source-file-name (file-name-nondirectory (buffer-file-name)))
+        (property-file (expand-file-name abaplib-core-property-file)))
+    ;; Ensure propert file exist
+    (unless (file-exists-p property-file)
+      (error "Missing property file, please user `search' to retrieve again!"))
+    (let* ((properties (json-read-file property-file))
+           (object-name (alist-get 'name properties))
+           (object-type (alist-get 'type properties))
+           (object-uri  (alist-get 'uri properties))
+           (sources))
+      )
+    ;; Ensure current file is a valid source file, which is:
+    ;; #1 Is in a file buffer
+    ;; #2 Contained in property file
+
     (unless (find (intern object-type) abaplib-core--supported-type)
       (error "Not a valid abap development file."))
     `((name . ,object-name)
