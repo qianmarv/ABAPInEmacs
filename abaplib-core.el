@@ -70,12 +70,12 @@
 (defvar abaplib--login-last-time nil
   "Last login timestamp")
 
-(defconst abaplib-core--not-a-type "ZZZZ")
+;; (defconst abaplib-core--not-a-type "ZZZZ")
 
-(defconst abaplib-core-property-file ".property.json")
+;; (defconst abaplib-core-property-file ".property.json")
 
-(defconst abaplib-core--supported-type  '(PROG CLAS DCLS DDLS ZZZZ)
-  "Supported ABAP Development Object Type")
+;; (defconst abaplib-core--supported-type  '(PROG CLAS DCLS DDLS ZZZZ)
+;;   "Supported ABAP Development Object Type")
 
 ;; (defvar abaplib--auth-data nil
 ;;   "System Login State")
@@ -121,9 +121,6 @@
 
 (defconst abaplib-core--uri-login "/sap/bc/adt/core/discovery")
 
-(defconst abaplib-core--dir-S "Source Code Library")
-
-(defconst abaplib-core--dir-C "Core Data Services")
 
 ;;==============================================================================
 ;; Project
@@ -666,76 +663,93 @@
      :data post-body)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; 1) Handle Metadata
-;; 2) Handle Source
 
-(defun abaplib-core-get-path (type)
-  (let* ((type-list (split-string type "/"))
+(defun abaplib-core-get-path (type &optional extra-directory)
+  (let* ((--dir-source-code "Source Code Library")
+         (type-list (split-string type "/"))
          (major-type (intern (car type-list)))
          (minor-type (intern (nth 1 type-list)))
          (parent-directory)
-         (sub-directory))
+         (sub-directory)
+         (final-directory))
+
     (case major-type
       ('CLAS (progn
-               (setq parent-directory abaplib-core--dir-S)
+               (setq parent-directory --dir-source-code)
                (setq sub-directory    "Classes" )))
       ('PROG (progn
-               (setq parent-path abaplib-core--dir-S)
+               (setq parent-path --dir-source-code)
                (setq sub-directory "Programs" ))))
 
     (let* ((parent-path (expand-file-name parent-directory
                                           (abaplib-get-project-path)))
-           (type-path (expand-file-name sub-directory parent-path)))
+           (sub-path (expand-file-name sub-directory parent-path)))
       (unless (file-exists-p parent-path)
         (make-directory parent-path))
-      (unless (file-exists-p type-path)
-        (make-directory type-path)))))
+      (unless (file-exists-p sub-path)
+        (make-directory sub-path))
+      (if extra-directory
+          (let ((extra-path (expand-file-name extra-directory sub-path)))
+            (unless (file-exists-p extra-path)
+              (make-directory extra-path))
+            extra-path)
+        sub-path))))
 
-(defun abaplib-core--retrieve-metadata (uri type)
+(defun abaplib-core--retrieve-metadata (uri type &optional file-name)
   (let* ((property-file (abaplib-core-get-path type))
          (major-type (substring type 0 4))
          (url (abaplib-get-project-api-url uri))
          (metadata-raw (abaplib--rest-api-call url
                                            nil
                                            :parser 'abaplib-util-xml-parser))
-         (impl-func (concat "abaplib-" major-type "-metadata-parser"))
-         (properties (apply impl-func metadata)))
+         (impl-func (intern (concat "abaplib-"
+                                    (downcase major-type)
+                                    "-metadata-parser")))
+         (properties (apply impl-func (list metadata-raw))))
+    (when file-name
+      (abaplib-util-jsonize-to-file properties file-name))
     properties))
 
-(defun abaplib-core--retrieve-source (uri etag source-file &target-buffer)
+(defun abaplib-core--retrieve-source (name uri etag &optional file-name)
   (abaplib--rest-api-call
-   url
+   (abaplib-get-project-api-url uri)
    (lambda (&rest rest)
      (let ((response-data (cl-getf rest :data))
-           (status-code (request-response-status-code (cl-getf rest :response)))
-           (source-file (expand-file-name (concat source-name
-                                                  abaplib-class--source-file-suffix)
-                                          (abaplib-class--get-directory class-name))))
+           (status-code (request-response-status-code (cl-getf rest :response))))
        (if (eq status-code 304)
            (message "Source remain unchanged in server.")
-         (write-region response-data nil source-file)
+         (if file-name
+             (write-region response-data nil file-name)
+           (let ((source-buffer (get-buffer-create name)))
+             (set-buffer source-buffer)
+             (insert response-data)))
          (message "Source retrieved from server and overwrite local."))))
    :parser 'abaplib-util-sourcecode-parser
    :headers (list `("If-None-Match" . ,etag)
                   '("Content-Type" . "plain/text"))))
- 
-(defun abaplib-core--retrieve-sources (properties type &optional source-file target-buffer)
-  (let* ((major-type (substring type 0 4))
-         (sources (alist-get 'sources properties)))
-    (when source-file
-      (let* ((source-prop (alist-get (intern source-file) sources))
-             (source-uri (alist-get 'source-uri source-prop)))
-        ))))
 
-(defun abaplib-core-retrieve-object (uri type)
+(defun abaplib-core-retrieve-object (name type uri &optional source-name)
   " Retrieve ABAP object"
   ;; 1. Retrieve metadata from uri -- common
   ;; 2. Parse metadata -- specific
   ;; 3. Save properties & Old properties -- common
   ;; 4. Parse source part --> source type/uri/etag -- specific
   ;; 5. Retrieve source
-  (let* ((metadata-props (abaplib-core--retrieve-metadata uri type)))
-    (abaplib-core--retrieve-source properties type)))
+  ;; TODO Preserver previous Etag Etag
+  (let* ((object-path (abaplib-core-get-path type name))
+         (property-file (expand-file-name ".properties.json" object-path))
+         (properties (abaplib-core--retrieve-metadata uri type property-file))
+         (sources (alist-get 'sources properties)))
+    (mapc (lambda (source-property)
+            (let* ((source-name (car source-property))
+                   (source-uri (alist-get 'source-uri source-property))
+                   (full-source-uri (concat uri "/" source-uri))
+                   (etag nil)
+                   (source-file (expand-file-name source-name object-path)))
+              (abaplib-core--retrieve-source source-name
+                                             full-source-uri
+                                             etag
+                                             source-file))) sources)))
 
 (defun abaplib-core--retrieve-properties (uri type)
   "Retrieve class metadata from server"
@@ -744,6 +758,49 @@
                                        nil
                                        :parser 'abaplib-util-xml-parser)))
     (abaplib-class--set-properties (abaplib-class--parse-metadata data))))
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; ABAP Class
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defun abaplib-clas-metadata-parser (metadata)
+  (let* ((adtcore-type (xml-get-attribute metadata 'type))
+         ;; (type-list (split-string adtcore-type "/"))
+         ;; (type (car type-list))
+         ;; (subtype (nth 1 type-list))
+         (name (xml-get-attribute metadata 'name))
+         (description (xml-get-attribute metadata 'description))
+         (version (xml-get-attribute metadata 'version))
+         (package-node (car (xml-get-children metadata 'packageRef)))
+         (package (xml-get-attribute package-node 'name))
+         (includes-node (xml-get-children metadata 'include))
+         (includes (mapcar
+                    (lambda (include)
+                      (let* ((version (xml-get-attribute include 'version))
+                             (source-uri (xml-get-attribute include 'sourceUri))
+                             (include-type (xml-get-attribute include 'includeType))
+                             (type (xml-get-attribute include 'type))
+                             (links (xml-get-children include 'link))
+                             (file-name (concat include-type ".clas.abap"))
+                             (etag))
+                        (dolist (link links)
+                          (when (string= (xml-get-attribute link 'type) "text/plain")
+                            (setq etag (xml-get-attribute link 'etag))
+                            (return)))
+                        (cons file-name `((version . ,version)
+                                          (source-uri . ,source-uri)
+                                          (include-type . ,include-type)
+                                          (type . ,type)
+                                          (etag . ,etag)))))
+                    includes-node)))
+    `((name . ,name)
+      (description . ,description)
+      (type . ,adtcore-type)
+      ;; (subtype . ,subtype)
+      (version . ,version)
+      (package . ,package)
+      (sources . ,includes))))
 
 
 (provide 'abaplib-core)

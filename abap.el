@@ -127,17 +127,20 @@
         (setq index (+ index 1))))
     (let* ((selected-item (completing-read "Maching Items: " completing-list))
            (selected-index (string-to-number (car (split-string selected-item " " t))))
-           (selected-object (nth (- selected-index 1) search-result)))
-      (abap-retrieve-source `((name . ,(xml-get-attribute selected-object 'name))
-                              (uri  . ,(xml-get-attribute selected-object 'uri))
-                              (type . ,(xml-get-attribute selected-object 'type)))))))
+           (selected-object (nth (- selected-index 1) search-result))
+           (object-node (xml-get-children selected-object 'objectReference)))
+      (abaplib-core-retrieve-object (xml-get-attribute selected-object 'name)
+                                    (xml-get-attribute selected-object 'type)
+                                    (xml-get-attribute selected-object 'uri)))))
 
-(defun abap-retrieve-source (&optional abap-object)
+(defun abap-retrieve-source ()
   "Retrieve source"
   (interactive)
   (let ((abap-object (or abap-object
                          (abap-get-abap-object-from-file))))
-    (abaplib-core-service-dispatch 'retrieve abap-object)))
+    ;; (abaplib-core-service-dispatch 'retrieve abap-object)
+    (abaplib-core-retrieve-object )
+    ))
 
 (defun abap-check-source (&optional abap-object)
   "Check source"
