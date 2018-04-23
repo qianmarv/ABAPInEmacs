@@ -174,8 +174,7 @@
            (object-name (alist-get 'name properties))
            (object-type (alist-get 'type properties))
            (object-uri  (alist-get 'uri properties))
-           (sources))
-      )
+           (sources)))
     ;; Ensure current file is a valid source file, which is:
     ;; #1 Is in a file buffer
     ;; #2 Contained in property file
