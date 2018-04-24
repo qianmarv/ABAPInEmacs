@@ -678,7 +678,7 @@
                (setq parent-directory --dir-source-code)
                (setq sub-directory    "Classes" )))
       ('PROG (progn
-               (setq parent-path --dir-source-code)
+               (setq parent-directory --dir-source-code)
                (setq sub-directory "Programs" ))))
 
     (let* ((parent-path (expand-file-name parent-directory
@@ -802,6 +802,33 @@
       (package . ,package)
       (sources . ,includes))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; ABAP Program
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defun abaplib-prog-metadata-parser (metadata)
+  (let* ((adtcore-type (xml-get-attribute metadata 'type))
+         ;; (type-list (split-string adtcore-type "/"))
+         ;; (type (car type-list))
+         ;; (subtype (nth 1 type-list))
+         (name (xml-get-attribute metadata 'name))
+         (description (xml-get-attribute metadata 'description))
+         (version (xml-get-attribute metadata 'version))
+         (package-node (car (xml-get-children metadata 'packageRef)))
+         (package (xml-get-attribute package-node 'name))
+         (file-name "main.prog.abap")
+         (includes (list (cons file-name `((version . ,version)
+                                           (source-uri . ,(xml-get-attribute metadata 'sourceUri))
+                                           (include-type . main)
+                                           (type . ,adtcore-type)
+                                           (etag . ,nil)
+                                           )))))
+    `((name . ,name)
+      (description . ,description)
+      (type . ,adtcore-type)
+      ;; (subtype . ,subtype)
+      (version . ,version)
+      (package . ,package)
+      (sources . ,includes))))
 
 (provide 'abaplib-core)
 ;;; abaplib.el ends here

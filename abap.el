@@ -25,7 +25,7 @@
 ;;; Code:
 
 (require 'abaplib-core)
-(require 'abaplib-program)
+;; (require 'abaplib-program)
 
 
 ;; (defvar-local abap--abap-object nil
