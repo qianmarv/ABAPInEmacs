@@ -133,14 +133,18 @@
                                     (xml-get-attribute selected-object 'type)
                                     (xml-get-attribute selected-object 'uri)))))
 
-(defun abap-retrieve-source ()
+(defun abap-retrieve-source (&optional abap-object)
   "Retrieve source"
   (interactive)
-  (let ((abap-object (or abap-object
-                         (abap-get-abap-object-from-file))))
+  (let ((source-name (file-name-nondirectory (buffer-file-name)))
+        (object-name (abaplib-core-get-property 'name))
+        (object-type (abaplib-core-get-property 'type))
+        (object-uri  (abaplib-core-get-property 'uri)))
     ;; (abaplib-core-service-dispatch 'retrieve abap-object)
-    (abaplib-core-retrieve-object )
-    ))
+    (abaplib-core-retrieve-object object-name
+                                  object-type
+                                  object-uri
+                                  source-name)))
 
 (defun abap-check-source (&optional abap-object)
   "Check source"
@@ -163,26 +167,6 @@
   (let ((abap-object (or abap-object
                          (abap-get-abap-object-from-file))))
     (abaplib-core-service-dispatch 'activate abap-object)))
-
-(defun abap-get-abap-object-from-file()
-  (let ((source-file-name (file-name-nondirectory (buffer-file-name)))
-        (property-file (expand-file-name abaplib-core-property-file)))
-    ;; Ensure propert file exist
-    (unless (file-exists-p property-file)
-      (error "Missing property file, please user `search' to retrieve again!"))
-    (let* ((properties (json-read-file property-file))
-           (object-name (alist-get 'name properties))
-           (object-type (alist-get 'type properties))
-           (object-uri  (alist-get 'uri properties))
-           (sources)))
-    ;; Ensure current file is a valid source file, which is:
-    ;; #1 Is in a file buffer
-    ;; #2 Contained in property file
-
-    (unless (find (intern object-type) abaplib-core--supported-type)
-      (error "Not a valid abap development file."))
-    `((name . ,object-name)
-      (type . ,object-type))))
 
 (provide 'abap)
 ;;; abap-in-emacs.el ends here

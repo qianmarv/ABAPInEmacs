@@ -107,7 +107,7 @@
 ;; (defvar abaplib--project-config-dir nil
 ;;   "ABAP Project Configuration Directory")
 
-(defvar-local abaplib--object-props nil
+(defvar-local abaplib--abap-object-properties nil
   "ABAP Object Properties")
 
 ;; (defvar-local abaplib--lock-handle nil
@@ -120,6 +120,8 @@
   "root uri of restful API")
 
 (defconst abaplib-core--uri-login "/sap/bc/adt/core/discovery")
+
+(defconst abaplib-core--property-file ".properties.json")
 
 
 ;;==============================================================================
@@ -451,6 +453,17 @@
   (abaplib-core--raise-fallback-error abap-object))
 
 
+;;==============================================================================
+;; Properties
+;;==============================================================================
+(defun abaplib-core-get-property (name &optional source_file)
+  (unless abaplib--abap-object-properties
+    (abaplib-core--get-local-properties))
+  (if source_file
+      (let ((source-properties))
+        (alist-get name abaplib--abap-object-properties))
+    (alist-get name abaplib--abap-object-properties)))
+
 
 ;;==============================================================================
 ;; Service - Syntax Check
@@ -695,6 +708,15 @@
             extra-path)
         sub-path))))
 
+
+(defun abaplib-core--get-local-properties ()
+  "Load property file on current directory for current buffer"
+  (let ((property-file (expand-file-name abaplib-core--property-file)))
+    ;; Ensure propert file exist
+    (unless (file-exists-p property-file)
+      (error "Missing property file, please user `search' to retrieve again!"))
+    (setq abaplib--abap-object-properties (json-read-file property-file))))
+
 (defun abaplib-core--retrieve-metadata (uri type &optional file-name)
   (let* ((property-file (abaplib-core-get-path type))
          (major-type (substring type 0 4))
@@ -706,11 +728,13 @@
                                     (downcase major-type)
                                     "-metadata-parser")))
          (properties (apply impl-func (list metadata-raw))))
+    (push (cons 'uri uri) properties)
+    (setq abaplib--abap-object-properties properties)
     (when file-name
       (abaplib-util-jsonize-to-file properties file-name))
     properties))
 
-(defun abaplib-core--retrieve-source (name uri etag &optional file-name)
+(defun abaplib-core--retrieve-source (name uri etag &optional file-path)
   (abaplib--rest-api-call
    (abaplib-get-project-api-url uri)
    (lambda (&rest rest)
@@ -718,8 +742,8 @@
            (status-code (request-response-status-code (cl-getf rest :response))))
        (if (eq status-code 304)
            (message "Source remain unchanged in server.")
-         (if file-name
-             (write-region response-data nil file-name)
+         (if file-path
+             (write-region response-data nil file-path)
            (let ((source-buffer (get-buffer-create name)))
              (set-buffer source-buffer)
              (insert response-data)))
@@ -737,28 +761,29 @@
   ;; 5. Retrieve source
   ;; TODO Preserver previous Etag Etag
   (let* ((object-path (abaplib-core-get-path type name))
-         (property-file (expand-file-name ".properties.json" object-path))
+         (property-file (expand-file-name abaplib-core--property-file object-path))
          (properties (abaplib-core--retrieve-metadata uri type property-file))
          (sources (alist-get 'sources properties)))
     (mapc (lambda (source-property)
-            (let* ((source-name (car source-property))
+            (let* ((local-source-name (car source-property))
                    (source-uri (alist-get 'source-uri source-property))
                    (full-source-uri (concat uri "/" source-uri))
                    (etag nil)
-                   (source-file (expand-file-name source-name object-path)))
-              (abaplib-core--retrieve-source source-name
-                                             full-source-uri
-                                             etag
-                                             source-file))) sources)))
+                   (file-path (expand-file-name source-name object-path)))
+              (when (string= local-source-name source-name)
+                (abaplib-core--retrieve-source source-name
+                                               full-source-uri
+                                               etag
+                                               file-path))))
+          sources)))
 
-(defun abaplib-core--retrieve-properties (uri type)
-  "Retrieve class metadata from server"
-  (let* ((url (abaplib-get-project-api-url uri))
-         (data (abaplib--rest-api-call url
-                                       nil
-                                       :parser 'abaplib-util-xml-parser)))
-    (abaplib-class--set-properties (abaplib-class--parse-metadata data))))
-
+;; (defun abaplib-core--retrieve-properties (uri type)
+;;   "Retrieve class metadata from server"
+;;   (let* ((url (abaplib-get-project-api-url uri))
+;;          (data (abaplib--rest-api-call url
+;;                                        nil
+;;                                        :parser 'abaplib-util-xml-parser)))
+;;     (abaplib-class--set-properties (abaplib-class--parse-metadata data))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
