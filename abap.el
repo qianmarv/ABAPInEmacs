@@ -129,11 +129,11 @@
            (selected-index (string-to-number (car (split-string selected-item " " t))))
            (selected-object (nth (- selected-index 1) search-result))
            (object-node (xml-get-children selected-object 'objectReference)))
-      (abaplib-core-retrieve-object (xml-get-attribute selected-object 'name)
+      (abaplib-do-retrieve (xml-get-attribute selected-object 'name)
                                     (xml-get-attribute selected-object 'type)
                                     (xml-get-attribute selected-object 'uri)))))
 
-(defun abap-retrieve-source (&optional abap-object)
+(defun abap-retrieve-source ()
   "Retrieve source"
   (interactive)
   (let ((source-name (file-name-nondirectory (buffer-file-name)))
@@ -141,17 +141,22 @@
         (object-type (abaplib-core-get-property 'type))
         (object-uri  (abaplib-core-get-property 'uri)))
     ;; (abaplib-core-service-dispatch 'retrieve abap-object)
-    (abaplib-core-retrieve-object object-name
+    (abaplib-do-retrieve object-name
                                   object-type
                                   object-uri
                                   source-name)))
 
-(defun abap-check-source (&optional abap-object)
+(defun abap-check-source ()
   "Check source"
   (interactive)
-  (let ((abap-object (or abap-object
-                         (abap-get-abap-object-from-file))))
-    (abaplib-core-service-dispatch 'check abap-object)))
+  (let* ((source-name (file-name-nondirectory (buffer-file-name)))
+         (source-version (abaplib-core-get-property 'version source-name))
+         (object-uri (abaplib-core-get-property 'uri))
+         (source-uri (abaplib-core-get-property 'source-uri source-name))
+         (source-code (buffer-substring-no-properties
+                       (point-min)
+                       (point-max))))
+    (abaplib-do-check "inactive" object-uri source-uri source-code)))
 
 
 (defun abap-submit-source (&optional abap-object)

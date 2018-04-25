@@ -752,7 +752,7 @@
    :headers (list `("If-None-Match" . ,etag)
                   '("Content-Type" . "plain/text"))))
 
-(defun abaplib-core-retrieve-object (name type uri &optional source-name)
+(defun abaplib-do-retrieve (name type uri &optional source-name)
   " Retrieve ABAP object"
   ;; 1. Retrieve metadata from uri -- common
   ;; 2. Parse metadata -- specific
@@ -784,6 +784,14 @@
 ;;                                        nil
 ;;                                        :parser 'abaplib-util-xml-parser)))
 ;;     (abaplib-class--set-properties (abaplib-class--parse-metadata data))))
+
+(defun abaplib-do-check(version uri source-uri source-code)
+  "Check syntax for program source
+  TODO check whether source changed since last retrieved from server
+       Not necessary to send the source code to server if no change."
+  (let ((chkrun-uri (concat uri "/" source-uri))
+        (chkrun-content (base64-encode-string source-code)))
+    (abaplib-core-check-post version uri chkrun-uri chkrun-content)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
