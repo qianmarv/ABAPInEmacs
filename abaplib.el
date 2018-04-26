@@ -466,11 +466,11 @@
 ;;==============================================================================
 (defun abaplib-do-search (query-string)
   "Search ABAP objects in server in synchronouse call"
-  (let* ((url (abaplib-get-project-api-url "/sap/bc/adt/repository/informationsystem/search"))
+  (let* ((search-uri "/sap/bc/adt/repository/informationsystem/search")
          (params `((operation . "quickSearch")
                    (query . ,(concat query-string "*"))
                    (maxResults . ,abap-search-list-max-results)))
-         (data (abaplib--rest-api-call url
+         (data (abaplib--rest-api-call search-uri
                                        nil
                                        :params params
                                        :parser 'abaplib-util-xml-parser))
@@ -510,9 +510,10 @@
    "</chkrun:checkObjectList>"))
 
 (defun abaplib--check-post (version adtcore-uri chkrun-uri chkrun-content)
-  (let ((post-data (abaplib--check-template adtcore-uri chkrun-uri version chkrun-content)))
+  (let ((check-uri "/sap/bc/adt/checkruns")
+        (post-data (abaplib--check-template adtcore-uri chkrun-uri version chkrun-content)))
     (abaplib--rest-api-call
-     (abaplib-get-project-api-url "/sap/bc/adt/checkruns")
+      check-uri
      (lambda (&rest rest)
        (let* ((check-report (xml-get-children (cl-getf rest :data) 'checkReport))
               (message-list (xml-get-children (car check-report) 'checkMessageList))
@@ -587,9 +588,9 @@
 ;;==============================================================================
 ;; Module - Core Services - Lock
 ;;==============================================================================
-(defun abaplib-lock-sync(uri csrf-token)
+(defun abaplib--lock-sync(uri csrf-token)
   (let* ((root-node (abaplib--rest-api-call
-                     (abaplib-get-project-api-url uri)
+                     uri
                      nil
                      :parser 'abaplib-util-xml-parser
                      :params '((_action . LOCK)
@@ -618,7 +619,7 @@
 (defun abaplib-unlock-async (uri lock-handle)
   (let ((prog-name (abaplib-object-get-name)))
     (abaplib--rest-api-call
-     (abaplib-get-project-api-url uri)
+     uri
      (lambda (&rest response)
        (message "Unlocked."))
      :type "POST"
@@ -632,9 +633,10 @@
   (abaplib--activate-post name uri))
 
 (defun abaplib--activate-post(adtcore-name adtcore-uri)
-  (let ((post-body (abaplib--activate-template adtcore-name adtcore-uri)))
+  (let ((activate-uri "/sap/bc/adt/activation")
+        (post-body (abaplib--activate-template adtcore-name adtcore-uri)))
     (abaplib--rest-api-call
-     (abaplib-get-project-api-url "/sap/bc/adt/activation")
+     activate-uri
      (lambda (&rest rest)
        (let* ((messages (xml-get-children (cl-getf rest :data) 'msg)))
          (abaplib-activate-show-message messages)))
@@ -691,8 +693,63 @@
              (message "Activation failed with `errors'")
              (abaplib-util-log-buf-pop))))))
 
+;;========================================================================
+;; Module - Core Services - Handle Change Request
+;;========================================================================
+(defun abaplib--retrieve-trans-request (full-source-uri)
+  "Check and retrieve transport request"
+  (let* ((transcheck-uri "/sap/bc/adt/cts/transportchecks")
+         (post_data (abaplib--transport-check-template full-source-uri))
+         (xml-root (abaplib--rest-api-call
+                    transcheck-uri
+                    nil
+                    :type "POST"
+                    :data post_data
+                    :parser 'abaplib-util-xml-parser))
+         (value-node (car (xml-get-children xml-root 'values)))
+         (data-node (car (xml-get-children value-node 'DATA)))
+         (req-node (car (xml-get-children data-node 'REQUESTS)))
+         (requests (xml-get-children req-node 'CTS_REQUEST)))
+    (mapcar (lambda (request)
+              (let* ((req_header (car (xml-get-children request 'REQ_HEADER)))
+                     (tr-number (car (last (car (xml-get-children req_header 'TRKORR)))))
+                     (text (car (last (car (xml-get-children req_header 'AS4TEXT))))))
+                (format "%-15s|%s" tr-number text)))
+            requests)))
 
+(defun abaplib--transport-check-template (full-source-uri)
+  (concat
+   "<?xml version=\"1.0\" encoding=\"UTF-8\"?><asx:abap xmlns:asx=\"http://www.sap.com/abapxml\" version=\"1.0\">"
+   "<asx:values>"
+   "<DATA>"
+   "<PGMID/>"
+   "<OBJECT/>"
+   "<OBJECTNAME/>"
+   "<DEVCLASS/>"
+   "<OPERATION/>"
+   "<URI>" full-source-uri "</URI>"
+   "</DATA>"
+   "</asx:values>"
+   "</asx:abap>"))
 
+(defun abaplib--post-cm-checkrun (tr-number full-source-uri)
+  (let* ((cm-checkrun-uri "/sap/bc/adt/solutionmanager/cm/checkruns")
+         (post_data (abaplib--solutionmanager-check-template tr-number full-source-uri))
+         (xml-root (abaplib--rest-api-call
+                    cm-checkrun-uri
+                    nil
+                    :type "POST"
+                    :data post_data
+                    :parser 'abaplib-util-xml-parser))
+         (status-text (xml-get-attribute xml-root 'statusText)))
+    (message status-text)))
+
+(defun abaplib--solutionmanager-check-template (tr-number full-source-uri)
+  (concat
+   "<?xml version=\"1.0\" encoding=\"UTF-8\"?><csol:checkObjects xmlns:csol=\"http://www.sap.com/solman/check\">"
+   "<csol:trRequest>" tr-number "</csol:trRequest>"
+   "<csol:checkObject operation=\"Change\" uri=" full-source-uri "/>"
+   "</csol:checkObjects>"))
 ;;========================================================================
 ;; Module - Core Services - Retrieve Metadata & Source Code
 ;;========================================================================
@@ -717,17 +774,16 @@
               (when (or (not source-name)
                         (string= local-source-name source-name))
                 (abaplib--retrieve-source source-name
-                                               full-source-uri
-                                               etag
-                                               file-path))))
+                                          full-source-uri
+                                          etag
+                                          file-path))))
           sources)))
 
 
 (defun abaplib--retrieve-metadata (uri type &optional file-name)
   (let* ((property-file (abaplib-get-path type))
          (major-type (substring type 0 4))
-         (url (abaplib-get-project-api-url uri))
-         (metadata-raw (abaplib--rest-api-call url
+         (metadata-raw (abaplib--rest-api-call uri
                                                nil
                                                :parser 'abaplib-util-xml-parser))
          (impl-func (intern (concat "abaplib-"
@@ -742,7 +798,7 @@
 
 (defun abaplib--retrieve-source (name uri etag &optional file-path)
   (abaplib--rest-api-call
-   (abaplib-get-project-api-url uri)
+   uri
    (lambda (&rest rest)
      (let ((response-data (cl-getf rest :data))
            (status-code (request-response-status-code (cl-getf rest :response))))
@@ -766,9 +822,9 @@
    TODO Check source in server side if current source was changed based on an old version
    The submission should be cancelled"
   (let* ((csrf-token (abaplib-get-csrf-token))
-         (lock-handle (abaplib-lock-sync full-source-uri csrf-token)))
+         (lock-handle (abaplib--lock-sync full-source-uri csrf-token)))
     (abaplib--rest-api-call
-     (abaplib-get-project-api-url full-source-uri)
+     full-source-uri
      (lambda (&rest rest)
        (let* ((response (cl-getf rest :response))
               (ETag (request-response-header response "ETag")))
