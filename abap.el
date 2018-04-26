@@ -24,7 +24,7 @@
 
 ;;; Code:
 
-(require 'abaplib-core)
+(require 'abaplib)
 ;; (require 'abaplib-program)
 
 
@@ -104,7 +104,7 @@
   (interactive)
   (let* ((project (abap-get-current-project))
          (query-string (read-string "Enter Search String: "))
-         (search-result (abaplib-core-do-search query-string))
+         (search-result (abaplib-do-search query-string))
          ;; (completing-list (mapcar (lambda(object-node)
          ;;                            (let ((name (xml-get-attribute object-node 'name))
          ;;                                  (type (xml-get-attribute object-node 'type))
@@ -171,12 +171,12 @@
                        (point-max))))
     (abaplib-do-submit full-source-uri source-code)))
 
-(defun abap-activate-source (&optional abap-object)
+(defun abap-activate-source ()
   "Activate source"
   (interactive)
-  (let ((abap-object (or abap-object
-                         (abap-get-abap-object-from-file))))
-    (abaplib-core-service-dispatch 'activate abap-object)))
+  (let ((object-name (abaplib-core-get-property 'name))
+        (object-uri (abaplib-core-get-property 'uri)))
+    (abaplib-do-activate object-name object-uri)))
 
 (provide 'abap)
 ;;; abap-in-emacs.el ends here
