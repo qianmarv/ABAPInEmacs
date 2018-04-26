@@ -156,15 +156,20 @@
          (source-code (buffer-substring-no-properties
                        (point-min)
                        (point-max))))
-    (abaplib-do-check "inactive" object-uri source-uri source-code)))
+    (abaplib-do-check source-version object-uri source-uri source-code)))
 
 
-(defun abap-submit-source (&optional abap-object)
+(defun abap-submit-source ()
   "Submit source"
   (interactive)
-  (let ((abap-object (or abap-object
-                         (abap-get-abap-object-from-file))))
-    (abaplib-core-service-dispatch 'submit abap-object)))
+  (let* ((source-name (file-name-nondirectory (buffer-file-name)))
+         (object-uri (abaplib-core-get-property 'uri))
+         (source-uri (abaplib-core-get-property 'source-uri source-name))
+         (full-source-uri (concat object-uri "/" source-uri))
+         (source-code (buffer-substring-no-properties
+                       (point-min)
+                       (point-max))))
+    (abaplib-do-submit full-source-uri source-code)))
 
 (defun abap-activate-source (&optional abap-object)
   "Activate source"

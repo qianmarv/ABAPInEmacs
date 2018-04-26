@@ -456,12 +456,13 @@
 ;;==============================================================================
 ;; Properties
 ;;==============================================================================
-(defun abaplib-core-get-property (name &optional source_file)
+(defun abaplib-core-get-property (name &optional source_name)
   (unless abaplib--abap-object-properties
     (abaplib-core--get-local-properties))
-  (if source_file
-      (let ((source-properties))
-        (alist-get name abaplib--abap-object-properties))
+  (if source_name
+      (let* ((sources (alist-get 'sources abaplib--abap-object-properties))
+             (source-properties (alist-get (intern source_name) sources)))
+        (alist-get name source-properties))
     (alist-get name abaplib--abap-object-properties)))
 
 
@@ -769,8 +770,9 @@
                    (source-uri (alist-get 'source-uri source-property))
                    (full-source-uri (concat uri "/" source-uri))
                    (etag nil)
-                   (file-path (expand-file-name source-name object-path)))
-              (when (string= local-source-name source-name)
+                   (file-path (expand-file-name local-source-name object-path)))
+              (when (or (not source-name)
+                        (string= local-source-name source-name))
                 (abaplib-core--retrieve-source source-name
                                                full-source-uri
                                                etag
@@ -793,6 +795,25 @@
         (chkrun-content (base64-encode-string source-code)))
     (abaplib-core-check-post version uri chkrun-uri chkrun-content)))
 
+
+(defun abaplib-do-submit(full-source-uri source-code)
+  "Submit source to server
+   TODO Check source in server side if current source was changed based on an old version
+   The submission should be cancelled"
+  (let* ((csrf-token (abaplib-core-get-csrf-token))
+         (lock-handle (abaplib-core-lock-sync full-source-uri csrf-token)))
+    (abaplib--rest-api-call
+     (abaplib-get-project-api-url full-source-uri)
+     (lambda (&rest rest)
+       (let* ((response (cl-getf rest :response))
+              (ETag (request-response-header response "ETag")))
+         ;;TODO Refresh properties
+         (message "program submit to server success.")))
+     :type "PUT"
+     :data source-code
+     :headers `(("Content-Type" . "text/plain")
+                ("x-csrf-token" . ,csrf-token))
+     :params `(("lockHandle" . ,lock-handle)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; ABAP Class
