@@ -667,7 +667,7 @@
         (post-body (abaplib--activate-postaudit-template inactive-objects)))
     (abaplib--rest-api-call activate-uri
                             (lambda (&rest rest)
-                              (message "Activated"))
+                              (message "succeed."))
                             :parser 'abaplib-util-xml-parser
                             :type "POST"
                             :params '((method . activate)
@@ -881,6 +881,18 @@
      :data source-code
      :headers headers
      :params params)))
+
+;;========================================================================
+;; Module - Core Services - Format Source From Server
+;;========================================================================
+(defun abaplib-do-format (source-code)
+  "Format Source Code"
+  (let* ((format-uri "/sap/bc/adt/abapsource/prettyprinter"))
+    (abaplib--rest-api-call format-uri
+                            nil
+                            :type "POST"
+                            :data source-code
+                            :parser 'abaplib-util-sourcecode-parser)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Module - Object Type Specific - ABAP Class

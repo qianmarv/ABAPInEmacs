@@ -185,5 +185,22 @@
         (object-uri (abaplib-get-property 'uri)))
     (abaplib-do-activate object-name object-uri)))
 
+(defun abap-format-source ()
+  "Format source - `pretty print'"
+  (interactive)
+  (let* ((curr-buffer (current-buffer))
+         (object-name (abaplib-get-property 'name))
+         (source-code (buffer-substring-no-properties
+                       (point-min)
+                       (point-max)))
+         (formated-source (abaplib-do-format source-code)))
+    (unless (or (not formated-source)
+                (string= formated-source ""))
+      (progn
+        (set-buffer curr-buffer)
+        (erase-buffer)
+        (goto-char (point-min))
+        (insert formated-source)))))
+
 (provide 'abap)
 ;;; abap-in-emacs.el ends here
