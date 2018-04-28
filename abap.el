@@ -137,10 +137,10 @@
   "Retrieve source"
   (interactive)
   (let ((source-name (file-name-nondirectory (buffer-file-name)))
-        (object-name (abaplib-core-get-property 'name))
-        (object-type (abaplib-core-get-property 'type))
-        (object-uri  (abaplib-core-get-property 'uri)))
-    ;; (abaplib-core-service-dispatch 'retrieve abap-object)
+        (object-name (abaplib-get-property 'name))
+        (object-type (abaplib-get-property 'type))
+        (object-uri  (abaplib-get-property 'uri)))
+    ;; (abaplib-service-dispatch 'retrieve abap-object)
     (abaplib-do-retrieve object-name
                                   object-type
                                   object-uri
@@ -150,9 +150,9 @@
   "Check source"
   (interactive)
   (let* ((source-name (file-name-nondirectory (buffer-file-name)))
-         (source-version (abaplib-core-get-property 'version source-name))
-         (object-uri (abaplib-core-get-property 'uri))
-         (source-uri (abaplib-core-get-property 'source-uri source-name))
+         (source-version (abaplib-get-property 'version source-name))
+         (object-uri (abaplib-get-property 'uri))
+         (source-uri (abaplib-get-property 'source-uri source-name))
          (source-code (buffer-substring-no-properties
                        (point-min)
                        (point-max))))
@@ -163,19 +163,26 @@
   "Submit source"
   (interactive)
   (let* ((source-name (file-name-nondirectory (buffer-file-name)))
-         (object-uri (abaplib-core-get-property 'uri))
-         (source-uri (abaplib-core-get-property 'source-uri source-name))
+         (object-uri (abaplib-get-property 'uri))
+         (source-uri (abaplib-get-property 'source-uri source-name))
+         (package     (abaplib-get-property 'package))
          (full-source-uri (concat object-uri "/" source-uri))
+         (tr-number)
          (source-code (buffer-substring-no-properties
                        (point-min)
                        (point-max))))
-    (abaplib-do-submit full-source-uri source-code)))
+    (unless (string= package "$TMP")
+      (let* ((requests (abaplib-retrieve-trans-request full-source-uri))
+             (selected-req (completing-read "Change Request: " requests)))
+        (setq tr-number (string-trim (car (split-string selected-req "|"))))
+        (message (abaplib-post-cm-checkrun tr-number full-source-uri))))
+    (abaplib-do-submit full-source-uri source-code tr-number)))
 
 (defun abap-activate-source ()
   "Activate source"
   (interactive)
-  (let ((object-name (abaplib-core-get-property 'name))
-        (object-uri (abaplib-core-get-property 'uri)))
+  (let ((object-name (abaplib-get-property 'name))
+        (object-uri (abaplib-get-property 'uri)))
     (abaplib-do-activate object-name object-uri)))
 
 (provide 'abap)
