@@ -46,7 +46,8 @@
     (unless (file-directory-p parent-dir)
       (make-directory parent-dir))
     (abaplib-create-project project)
-    (message "Project %s created and added to workspace." project)))
+    (message "Project %s created and added to workspace." project)
+    (abap-open-project project)))
 
 (defun abap-add-project ()
   "Add ABAP project into workspace"
@@ -68,10 +69,11 @@
     (message "Project %s removed from workspace." project)))
 
 ;;;###autoload
-(defun abap-open-project ()
+(defun abap-open-project (&optional project)
   "Open ABAP project"
   (interactive)
-  (let ((project (completing-read "Select Project: " (abaplib-get-project-list))))
+  (let ((project (or project
+                     (completing-read "Select Project: " (abaplib-get-project-list)))))
     (abaplib-switch-project project)
     (dired project)))
 

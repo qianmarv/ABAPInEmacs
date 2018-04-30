@@ -352,7 +352,14 @@
                   (message (buffer-string))
                   (buffer-string)) nil file))
 
-
+(defun abaplib-util-upsert-alists (alists pair)
+  "Append/Update alist with pair"
+  (let* ((key (car pair))
+         (existp (assoc-string key alists)))
+    (if existp
+        (setcdr (assoc-string key alists) (cdr pair))
+      (setq alists (append alists (list pair)))))
+  alists)
 
 (defun abaplib-util-goto-position (line column)
   (goto-char (point-min))
