@@ -23,10 +23,6 @@
 ;; 
 
 ;;; Code:
-;; TODO Most of service function shouldn't bind tight with project
-;;      the `abaplib--current-project' should be considered as always
-;;      have value which guaranteed by outside consumer, otherwise consider
-;;      as an exception.
 
 ;; (eval-when-compile (require 'cl))
 (require 'request)
@@ -57,6 +53,7 @@
   :type 'number
   :group 'abap)
 
+;; NOT Used Yet
 (defvar abap-log-level nil
   "Logging level for abap
    One of value `debug'")
@@ -819,7 +816,8 @@
                                           full-source-uri
                                           etag
                                           file-path))))
-          sources)))
+          sources)
+    object-path))
 
 
 (defun abaplib--retrieve-metadata (uri type &optional file-name)

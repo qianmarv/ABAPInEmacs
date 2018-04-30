@@ -35,6 +35,7 @@
 ;; Project
 ;;==============================================================================
 
+;;;###autoload
 (defun abap-create-project ()
   "Create new ABAP project"
   (interactive)
@@ -66,8 +67,9 @@
     (abaplib-remove-project project)
     (message "Project %s removed from workspace." project)))
 
-(defun abap-switch-project ()
-  "Switch ABAP project"
+;;;###autoload
+(defun abap-open-project ()
+  "Open ABAP project"
   (interactive)
   (let ((project (completing-read "Select Project: " (abaplib-get-project-list))))
     (abaplib-switch-project project)
@@ -99,6 +101,7 @@
     (message "Connecting...")
     (abaplib-auth-login-with-token project login-token client)))
 
+;;;###autoload
 (defun abap-search-object ()
   "Retrieve ABAP objects"
   (interactive)
@@ -128,10 +131,11 @@
     (let* ((selected-item (completing-read "Maching Items: " completing-list))
            (selected-index (string-to-number (car (split-string selected-item " " t))))
            (selected-object (nth (- selected-index 1) search-result))
-           (object-node (xml-get-children selected-object 'objectReference)))
-      (abaplib-do-retrieve (xml-get-attribute selected-object 'name)
-                                    (xml-get-attribute selected-object 'type)
-                                    (xml-get-attribute selected-object 'uri)))))
+           (object-node (xml-get-children selected-object 'objectReference))
+           (object-path (abaplib-do-retrieve (xml-get-attribute selected-object 'name)
+                                             (xml-get-attribute selected-object 'type)
+                                             (xml-get-attribute selected-object 'uri))))
+      (dired object-path))))
 
 (defun abap-retrieve-source ()
   "Retrieve source"
@@ -142,9 +146,9 @@
         (object-uri  (abaplib-get-property 'uri)))
     ;; (abaplib-service-dispatch 'retrieve abap-object)
     (abaplib-do-retrieve object-name
-                                  object-type
-                                  object-uri
-                                  source-name)))
+                         object-type
+                         object-uri
+                         source-name)))
 
 (defun abap-check-source ()
   "Check source"
