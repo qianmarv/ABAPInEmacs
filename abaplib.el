@@ -107,8 +107,8 @@
 (defvar-local abaplib--abap-object-properties nil
   "ABAP Object Properties")
 
-;; (defvar-local abaplib--lock-handle nil
-;;   "Lock Handle")
+(defvar-local abaplib--abap-object-tr-number nil
+  "")
 
 (defconst abaplib--log-buffer "*ABAP Log*"
   "ABAP log buffer")
@@ -629,15 +629,19 @@
 (defun abaplib-do-activate(name uri)
   (abaplib--activate-post name uri))
 
+(defun abaplib--activate-parse-result (result)
+  (let ((result-type (car result)))
+    (case result-type
+      ('messages (abaplib--activate-show-message (xml-get-children result
+                                                                 'msg)))
+      ('inactiveObjects (abaplib--activate-postaudit (xml-get-children result
+                                                                       'entry)))
+      (t (message "Source activated in server.")))))
+
 (defun abaplib--activate-post(adtcore-name adtcore-uri)
   (let* ((preaudit-result (abaplib--activate-preaudit adtcore-name adtcore-uri))
          (result-type (car preaudit-result)))
-    (case result-type
-      ('messages (abaplib-activate-show-message (xml-get-childre preaudit-result
-                                                                 'msg)))
-      ('inactiveObjects (abaplib--activate-postaudit (xml-get-children preaudit-result
-                                                                       'entry)))
-      (t (message "succeed.")))))
+    (abaplib--activate-parse-result preaudit-result)))
 
 (defun abaplib--activate-preaudit (adtcore-name adtcore-uri)
   (let ((activate-uri "/sap/bc/adt/activation")
@@ -664,7 +668,8 @@
         (post-body (abaplib--activate-postaudit-template inactive-objects)))
     (abaplib--rest-api-call activate-uri
                             (lambda (&rest rest)
-                              (message "succeed."))
+                              (let ((result (cl-getf rest :data)))
+                                (abaplib--activate-parse-result result)))
                             :parser 'abaplib-util-xml-parser
                             :type "POST"
                             :params '((method . activate)
@@ -694,7 +699,7 @@
                            "</adtcore:objectReferences>"))
     post-xml))
 
-(defun abaplib-activate-show-message (messages)
+(defun abaplib--activate-show-message (messages)
   (let ((severity-level "I")
         (output-log))
     (dolist (message messages severity-level output-log)
@@ -747,13 +752,23 @@
          (value-node (car (xml-get-children xml-root 'values)))
          (data-node (car (xml-get-children value-node 'DATA)))
          (req-node (car (xml-get-children data-node 'REQUESTS)))
-         (requests (xml-get-children req-node 'CTS_REQUEST)))
-    (mapcar (lambda (request)
-              (let* ((req_header (car (xml-get-children request 'REQ_HEADER)))
-                     (tr-number (car (last (car (xml-get-children req_header 'TRKORR)))))
-                     (text (car (last (car (xml-get-children req_header 'AS4TEXT))))))
-                (format "%s | %s" tr-number text)))
-            requests)))
+         (requests (xml-get-children req-node 'CTS_REQUEST))
+         (locks-node (car (xml-get-children data-node 'LOCKS)))
+         (object-lock (car (xml-get-children locks-node 'CTS_OBJECT_LOCK))))
+    (if requests
+        (mapcar (lambda (request)
+                  (let* ((req-header (car (xml-get-children request 'REQ_HEADER)))
+                         (tr-number (car (last (car (xml-get-children req-header 'TRKORR)))))
+                         (text (car (last (car (xml-get-children req-header 'AS4TEXT))))))
+                    (format "%s | %s" tr-number text)))
+                requests)
+      (if object-lock
+          (let* ((lock-holder (car (xml-get-children object-lock 'LOCK_HOLDER)))
+                 (req-header (car (xml-get-children lock-holder 'REQ_HEADER)))
+                 (tr-number (car (last (car (xml-get-children req-header 'TRKORR)))))
+                 (text (car (last (car (xml-get-children req-header 'AS4TEXT))))))
+            (list (format "%s | %s" tr-number text)))
+        (error "Can't find available transport request.")))))
 
 (defun abaplib--transport-check-template (full-source-uri)
   (concat
@@ -771,7 +786,6 @@
    "</asx:abap>"))
 
 (defun abaplib-post-cm-checkrun (tr-number full-source-uri)
-  (message "Debug==> tr-number: %s" tr-number)
   (let* ((cm-checkrun-uri "/sap/bc/adt/solutionmanager/cm/checkruns")
          (post_data (abaplib--solutionmanager-check-template tr-number full-source-uri))
          (xml-root (abaplib--rest-api-call
