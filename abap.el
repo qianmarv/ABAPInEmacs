@@ -101,7 +101,7 @@
          (login-token (format "Basic %s" (base64-encode-string
                                           (concat username ":" password)))))
     (message "Connecting...")
-    (abaplib-auth-login-with-token project login-token client)))
+    (abaplib-auth-login-with-token project login-token client abap-save-login-credential)))
 
 ;;;###autoload
 (defun abap-search-object ()

@@ -244,7 +244,7 @@
 ;; Module - Authentication
 ;;==============================================================================
 
-(defun abaplib-auth-login-with-token(project login-token sap-client)
+(defun abaplib-auth-login-with-token(project login-token sap-client &optional save?)
   "Login into ABAP Server with token"
   (let ((url ;; "http://ldcier9.wdf.sap.corp:50000/sap/bc/adt/core/discovery"
          (abaplib-get-project-api-url abaplib--uri-login))
@@ -274,10 +274,9 @@
 
     ;; Login succeed
     (setq abaplib--login-last-time (time-to-seconds (current-time)))
-    (when abap-save-login-credential
+    (when save?
       (let ((login-credential (cons 'login_token login-token))
             (sap-client       (cons 'sap_client sap-client)))
-        (message "%s" login-credential)
         (abaplib-project-set-property project login-credential)
         (abaplib-project-set-property project sap-client)))
     (message "Connected to server!")))
@@ -423,21 +422,20 @@
          (params (cl-getf args :params)))
 
     ;; Verify whether need to login with token
-    ;; (let ((now (time-to-seconds (current-time))))
-    ;;   (when (or (not abaplib--login-last-time)
-    ;;             (> (- now abaplib--login-last-time) abap-login-timeout))
-    ;;     (abaplib-auth-login-with-token abaplib--current-project
-    ;;                                    login-token
-    ;;                                    (abaplib-get-sap-client))))
+    (let ((now (time-to-seconds (current-time))))
+      (when (> (- now abaplib--login-last-time) abap-login-timeout)
+        (abaplib-auth-login-with-token abaplib--current-project
+                                       login-token
+                                       (abaplib-get-sap-client))))
     ;; For method like POST, PUT, DELETE, required to get CSRF Token first
     ;; (message "headers:= %s" headers)
-    (if (string= type "GET")
-        (setq headers (append headers (list login-token)))
-      (unless (assoc-string 'x-csrf-token headers)
-        (let ((csrf-token (abaplib-get-csrf-token)))
-          (setq headers
-                (append headers
-                        (list (cons "x-csrf-token" csrf-token)))))))
+    (unless (string= type "GET")
+        ;; (setq headers (append headers (list login-token)))
+        (unless (assoc-string 'x-csrf-token headers)
+          (let ((csrf-token (abaplib-get-csrf-token)))
+            (setq headers
+                  (append headers
+                          (list (cons "x-csrf-token" csrf-token)))))))
 
     ;; TODO Delete :headers from args as we have explicitly put headers here
     ;; (setq params (append params
@@ -517,7 +515,7 @@
   (let ((check-uri "/sap/bc/adt/checkruns")
         (post-data (abaplib--check-template adtcore-uri chkrun-uri version chkrun-content)))
     (abaplib--rest-api-call
-      check-uri
+     check-uri
      (lambda (&rest rest)
        (let* ((check-report (xml-get-children (cl-getf rest :data) 'checkReport))
               (message-list (xml-get-children (car check-report) 'checkMessageList))
@@ -640,7 +638,7 @@
   (let ((result-type (car result)))
     (case result-type
       ('messages (abaplib--activate-show-message (xml-get-children result
-                                                                 'msg)))
+                                                                   'msg)))
       ('inactiveObjects (abaplib--activate-postaudit (xml-get-children result
                                                                        'entry)))
       (t (message "Source activated in server.")))))
