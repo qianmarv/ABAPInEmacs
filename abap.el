@@ -208,5 +208,42 @@
         (goto-char (point-min))
         (insert formated-source)))))
 
+(defun abap-code-completion ()
+  "ABAP code completion"
+  (interactive)
+  (let* ((curr-buffer (current-buffer))
+         (source-name (file-name-nondirectory (buffer-file-name)))
+         (object-uri (abaplib-get-property 'uri))
+         (source-uri (abaplib-get-property 'source-uri source-name))
+         (full-source-uri (concat object-uri "/" source-uri))
+         (source-code (buffer-substring-no-properties
+                       (point-min)
+                       (point-max)))
+         (completion-result (abaplib-do-codecompletion-proposal full-source-uri
+                                                                (line-number-at-pos)
+                                                                (current-column)
+                                                                source-code)))
+    (unless completion-result
+      (error "No matches"))
+    (let* ((prompt-list (mapcar
+                         (lambda (completion)
+                           `(,(intern (abaplib-util-get-xml-value completion 'IDENTIFIER))
+                             . ,completion))
+                         completion-result))
+           (selected-key (completing-read "Matches: " prompt-list))
+           (completion (alist-get (intern selected-key) prompt-list))
+           (prefix-length (string-to-int (abaplib-util-get-xml-value completion
+                                                                     'PREFIXLENGTH)))
+           (completion-source (abaplib-do-codecompletion-insert full-source-uri
+                                                                (line-number-at-pos)
+                                                                (current-column)
+                                                                selected-key
+                                                                source-code)))
+      (unless (or (not completion-source)
+                  (string= completion-source ""))
+        (let ((source (substring completion-source prefix-length)))
+          (set-buffer curr-buffer)
+          (insert source))))))
+
 (provide 'abap)
 ;;; abap-in-emacs.el ends here

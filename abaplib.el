@@ -119,6 +119,164 @@
 
 
 ;;==============================================================================
+;; Module - Tools & Utilities
+;;==============================================================================
+(defun abaplib-util-current-dir ()
+  (when buffer-file-name
+    (file-name-directory buffer-file-name)))
+
+(defun abaplib-util-xml-parser()
+  (libxml-parse-xml-region (point-min) (point-max)))
+
+(defun abaplib-util-sourcecode-parser()
+  (progn
+    (goto-char (point-min))
+    (while (re-search-forward "\r" nil t)
+      (replace-match ""))
+    (buffer-string)))
+
+(defun abaplib-util-log-buf-write(log)
+  (save-current-buffer
+    (set-buffer (get-buffer-create abaplib--log-buffer))
+    (setq buffer-read-only nil)
+    (goto-char (point-max))
+    (insert "\n\n")
+    (insert (concat "Log at: "
+                    (format-time-string "%Y-%m-%dT%T")
+                    ((lambda (x) (concat (substring x 0 3) ":" (substring x 3 5)))
+                     (format-time-string "%z"))))
+    ;; (insert "\n")
+    (insert (format "%s" log))
+    (setq buffer-read-only t)
+    ))
+
+(defun abaplib-util-log-buf-pop()
+  (pop-to-buffer (get-buffer-create abaplib--log-buffer)))
+
+(defun abaplib-util-jsonize-to-file(list file)
+  (write-region (with-temp-buffer
+                  (insert (json-encode list))
+                  (json-pretty-print (point-min) (point-max))
+                  (message (buffer-string))
+                  (buffer-string)) nil file))
+
+(defun abaplib-util-upsert-alists (alists pair)
+  "Append/Update alist with pair"
+  (let* ((key (car pair))
+         (existp (assoc-string key alists)))
+    (if existp
+        (setcdr (assoc-string key alists) (cdr pair))
+      (setq alists (append alists (list pair)))))
+  alists)
+
+(defun abaplib-util-goto-position (line column)
+  (goto-char (point-min))
+  (forward-line (- line 1))
+  (move-to-column column))
+
+(defun abaplib-util-get-xml-value (node key)
+  (car (last (car (xml-get-children node key)))))
+
+(defun abaplib--get-local-properties ()
+  "Load property file on current directory for current buffer"
+  (let ((property-file (expand-file-name abaplib--property-file)))
+    ;; Ensure propert file exist
+    (unless (file-exists-p property-file)
+      (error "Missing property file, please user `search' to retrieve again!"))
+    (setq abaplib--abap-object-properties (json-read-file property-file))))
+
+(defun abaplib-get-property (name &optional source_name)
+  (unless abaplib--abap-object-properties
+    (abaplib--get-local-properties))
+  (if source_name
+      (let* ((sources (alist-get 'sources abaplib--abap-object-properties))
+             (source-properties (alist-get (intern source_name) sources)))
+        (alist-get name source-properties))
+    (alist-get name abaplib--abap-object-properties)))
+
+(defun abaplib-get-path (type &optional extra-directory)
+  (let* ((--dir-source-code "Source Code Library")
+         (type-list (split-string type "/"))
+         (major-type (intern (car type-list)))
+         (minor-type (intern (nth 1 type-list)))
+         (parent-directory)
+         (sub-directory)
+         (final-directory))
+
+    (case major-type
+      ('CLAS (progn
+               (setq parent-directory --dir-source-code)
+               (setq sub-directory    "Classes" )))
+      ('PROG (progn
+               (setq parent-directory --dir-source-code)
+               (setq sub-directory "Programs" ))))
+
+    (let* ((parent-path (expand-file-name parent-directory
+                                          (abaplib-get-project-path)))
+           (sub-path (expand-file-name sub-directory parent-path)))
+      (unless (file-exists-p parent-path)
+        (make-directory parent-path))
+      (unless (file-exists-p sub-path)
+        (make-directory sub-path))
+      (if extra-directory
+          (let ((extra-path (expand-file-name extra-directory sub-path)))
+            (unless (file-exists-p extra-path)
+              (make-directory extra-path))
+            extra-path)
+        sub-path))))
+
+(defun abaplib--rest-api-call(uri success-callback &rest args)
+  "Call service API."
+  (let* ((url (abaplib-get-project-api-url uri))
+         (login-token (cons "Authorization" (abaplib-get-login-token)))
+         (headers (cl-getf args :headers))
+         (type    (or (cl-getf args :type) "GET"))
+         (params (cl-getf args :params)))
+
+    ;; Verify whether need to login with token
+    (let ((now (time-to-seconds (current-time))))
+      (when (> (- now abaplib--login-last-time) abap-login-timeout)
+        (abaplib-auth-login-with-token abaplib--current-project
+                                       login-token
+                                       (abaplib-get-sap-client))))
+    ;; For method like POST, PUT, DELETE, required to get CSRF Token first
+    ;; (message "headers:= %s" headers)
+    (unless (string= type "GET")
+        ;; (setq headers (append headers (list login-token)))
+        (unless (assoc-string 'x-csrf-token headers)
+          (let ((csrf-token (abaplib-get-csrf-token)))
+            (setq headers
+                  (append headers
+                          (list (cons "x-csrf-token" csrf-token)))))))
+
+    ;; TODO Delete :headers from args as we have explicitly put headers here
+    ;; (setq params (append params
+    ;;                      (list (cons "sap-client" sap-client))))
+    (append (request-response-data
+             (apply #'request
+                    url
+                    :sync (not success-callback)
+                    :headers headers
+                    :status-code '(
+                                   ;; (304 . (lambda (&rest _) (message "304 Source Not Modified")))
+                                   (401 . (lambda (&rest _) (message "Got 401: Not Authorized")))
+                                   (403 . (lambda (&rest _) (message "Got 403: Forbidden"))))
+                    :params params
+                    :success success-callback
+                    :error  (lambda (&key error-thrown &allow-other-keys &rest _)
+                              (let ((error-message)))
+                              (if error-thrown
+                                  (setq error-message ((lambda (exception-node)
+                                                         (car (last
+                                                               (car (xml-get-children exception-node 'localizedMessage)))))
+                                                       error-thrown))
+                                (setq error-message "Unknown error occured."))
+                              (message "%s" error-message))
+                    ;; :complete (lambda (&rest -) (message "Complete" ))
+                    args)))))
+
+
+;;==============================================================================
 ;; Module - Project
 ;;==============================================================================
 (defun abaplib-get-ws-describe-file()
@@ -309,159 +467,6 @@
     (request-response-header response "x-csrf-token")))
 
 
-;;==============================================================================
-;; Module - Tools & Utilities
-;;==============================================================================
-(defun abaplib-util-current-dir ()
-  (when buffer-file-name
-    (file-name-directory buffer-file-name)))
-
-(defun abaplib-util-xml-parser()
-  (libxml-parse-xml-region (point-min) (point-max)))
-
-(defun abaplib-util-sourcecode-parser()
-  (progn
-    (goto-char (point-min))
-    (while (re-search-forward "\r" nil t)
-      (replace-match ""))
-    (buffer-string)))
-
-(defun abaplib-util-log-buf-write(log)
-  (save-current-buffer
-    (set-buffer (get-buffer-create abaplib--log-buffer))
-    (setq buffer-read-only nil)
-    (goto-char (point-max))
-    (insert "\n\n")
-    (insert (concat "Log at: "
-                    (format-time-string "%Y-%m-%dT%T")
-                    ((lambda (x) (concat (substring x 0 3) ":" (substring x 3 5)))
-                     (format-time-string "%z"))))
-    ;; (insert "\n")
-    (insert (format "%s" log))
-    (setq buffer-read-only t)
-    ))
-
-(defun abaplib-util-log-buf-pop()
-  (pop-to-buffer (get-buffer-create abaplib--log-buffer)))
-
-(defun abaplib-util-jsonize-to-file(list file)
-  (write-region (with-temp-buffer
-                  (insert (json-encode list))
-                  (json-pretty-print (point-min) (point-max))
-                  (message (buffer-string))
-                  (buffer-string)) nil file))
-
-(defun abaplib-util-upsert-alists (alists pair)
-  "Append/Update alist with pair"
-  (let* ((key (car pair))
-         (existp (assoc-string key alists)))
-    (if existp
-        (setcdr (assoc-string key alists) (cdr pair))
-      (setq alists (append alists (list pair)))))
-  alists)
-
-(defun abaplib-util-goto-position (line column)
-  (goto-char (point-min))
-  (forward-line (- line 1))
-  (move-to-column column))
-
-(defun abaplib--get-local-properties ()
-  "Load property file on current directory for current buffer"
-  (let ((property-file (expand-file-name abaplib--property-file)))
-    ;; Ensure propert file exist
-    (unless (file-exists-p property-file)
-      (error "Missing property file, please user `search' to retrieve again!"))
-    (setq abaplib--abap-object-properties (json-read-file property-file))))
-
-(defun abaplib-get-property (name &optional source_name)
-  (unless abaplib--abap-object-properties
-    (abaplib--get-local-properties))
-  (if source_name
-      (let* ((sources (alist-get 'sources abaplib--abap-object-properties))
-             (source-properties (alist-get (intern source_name) sources)))
-        (alist-get name source-properties))
-    (alist-get name abaplib--abap-object-properties)))
-
-(defun abaplib-get-path (type &optional extra-directory)
-  (let* ((--dir-source-code "Source Code Library")
-         (type-list (split-string type "/"))
-         (major-type (intern (car type-list)))
-         (minor-type (intern (nth 1 type-list)))
-         (parent-directory)
-         (sub-directory)
-         (final-directory))
-
-    (case major-type
-      ('CLAS (progn
-               (setq parent-directory --dir-source-code)
-               (setq sub-directory    "Classes" )))
-      ('PROG (progn
-               (setq parent-directory --dir-source-code)
-               (setq sub-directory "Programs" ))))
-
-    (let* ((parent-path (expand-file-name parent-directory
-                                          (abaplib-get-project-path)))
-           (sub-path (expand-file-name sub-directory parent-path)))
-      (unless (file-exists-p parent-path)
-        (make-directory parent-path))
-      (unless (file-exists-p sub-path)
-        (make-directory sub-path))
-      (if extra-directory
-          (let ((extra-path (expand-file-name extra-directory sub-path)))
-            (unless (file-exists-p extra-path)
-              (make-directory extra-path))
-            extra-path)
-        sub-path))))
-
-(defun abaplib--rest-api-call(uri success-callback &rest args)
-  "Call service API."
-  (let* ((url (abaplib-get-project-api-url uri))
-         (login-token (cons "Authorization" (abaplib-get-login-token)))
-         (headers (cl-getf args :headers))
-         (type    (or (cl-getf args :type) "GET"))
-         (params (cl-getf args :params)))
-
-    ;; Verify whether need to login with token
-    (let ((now (time-to-seconds (current-time))))
-      (when (> (- now abaplib--login-last-time) abap-login-timeout)
-        (abaplib-auth-login-with-token abaplib--current-project
-                                       login-token
-                                       (abaplib-get-sap-client))))
-    ;; For method like POST, PUT, DELETE, required to get CSRF Token first
-    ;; (message "headers:= %s" headers)
-    (unless (string= type "GET")
-        ;; (setq headers (append headers (list login-token)))
-        (unless (assoc-string 'x-csrf-token headers)
-          (let ((csrf-token (abaplib-get-csrf-token)))
-            (setq headers
-                  (append headers
-                          (list (cons "x-csrf-token" csrf-token)))))))
-
-    ;; TODO Delete :headers from args as we have explicitly put headers here
-    ;; (setq params (append params
-    ;;                      (list (cons "sap-client" sap-client))))
-    (append (request-response-data
-             (apply #'request
-                    url
-                    :sync (not success-callback)
-                    :headers headers
-                    :status-code '(
-                                   ;; (304 . (lambda (&rest _) (message "304 Source Not Modified")))
-                                   (401 . (lambda (&rest _) (message "Got 401: Not Authorized")))
-                                   (403 . (lambda (&rest _) (message "Got 403: Forbidden"))))
-                    :params params
-                    :success success-callback
-                    :error  (lambda (&key error-thrown &allow-other-keys &rest _)
-                              (let ((error-message)))
-                              (if error-thrown
-                                  (setq error-message ((lambda (exception-node)
-                                                         (car (last
-                                                               (car (xml-get-children exception-node 'localizedMessage)))))
-                                                       error-thrown))
-                                (setq error-message "Unknown error occured."))
-                              (message "%s" error-message))
-                    ;; :complete (lambda (&rest -) (message "Complete" ))
-                    args)))))
 
 ;;==============================================================================
 ;; Module - Core Services - Search
@@ -487,6 +492,7 @@
   "Check syntax for program source
   TODO check whether source changed since last retrieved from server
        Not necessary to send the source code to server if no change."
+  (message "Send syntax check request...")
   (let ((chkrun-uri (concat uri "/" source-uri))
         (chkrun-content (base64-encode-string source-code)))
     (abaplib--check-post version uri chkrun-uri chkrun-content)))
@@ -591,6 +597,7 @@
 ;; Module - Core Services - Lock
 ;;==============================================================================
 (defun abaplib--lock-sync(uri csrf-token)
+  (message "Try to lock object...")
   (let* ((root-node (abaplib--rest-api-call
                      uri
                      nil
@@ -632,6 +639,7 @@
 ;; Module - Core Services - Activate Server Side Source
 ;;========================================================================
 (defun abaplib-do-activate(name uri)
+  (message "Post activation request...")
   (abaplib--activate-post name uri))
 
 (defun abaplib--activate-parse-result (result)
@@ -745,6 +753,7 @@
 ;;========================================================================
 (defun abaplib-retrieve-trans-request (full-source-uri)
   "Check and retrieve transport request"
+  (message "Check transport request...")
   (let* ((transcheck-uri "/sap/bc/adt/cts/transportchecks")
          (post_data (abaplib--transport-check-template full-source-uri))
          (xml-root (abaplib--rest-api-call
@@ -909,6 +918,41 @@
                             nil
                             :type "POST"
                             :data source-code
+                            :parser 'abaplib-util-sourcecode-parser)))
+
+;;========================================================================
+;; Module - Core Services - Code Completion
+;;========================================================================
+(defun abaplib-do-codecompletion-proposal (full-source-uri pos_row pos_col source-code)
+  "Request code completion proposal"
+  (message "Request proposal completion from server...")
+  (let* ((request-uri "/sap/bc/adt/abapsource/codecompletion/proposal")
+         (params `((uri . ,(format "%s#start=%d,%d"
+                                       full-source-uri pos_row pos_col))
+                   (signalCompleteness . true)))
+         (completion-result (abaplib--rest-api-call request-uri
+                                                    nil
+                                                    :type "POST"
+                                                    :data source-code
+                                                    :params params
+                                                    :parser 'abaplib-util-xml-parser)))
+
+    (when completion-result
+      (let* ((values-node (car (xml-get-children completion-result 'values)))
+             (data-node   (car (xml-get-children values-node 'DATA))))
+        (xml-get-children data-node 'SCC_COMPLETION)))))
+
+(defun abaplib-do-codecompletion-insert (full-source-uri pos_row pos_col pattern-key source-code)
+  "Insert code completion"
+  (let* ((request-uri "/sap/bc/adt/abapsource/codecompletion/insertion")
+         (params `((uri . ,(format "%s#start=%d,%d"
+                                   full-source-uri pos_row pos_col))
+                   (patternKey . ,pattern-key))))
+    (abaplib--rest-api-call request-uri
+                            nil
+                            :type "POST"
+                            :data source-code
+                            :params params
                             :parser 'abaplib-util-sourcecode-parser)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

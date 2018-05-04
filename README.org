@@ -1,8 +1,6 @@
 #+TITLE: ABAP In Emacs (AiE)
 
 
-Not yet, Working in Process...
-
 * Introduction
   This package instend to create a complete ABAP development environment in
   Emacs. Which should support below functions:
@@ -15,5 +13,80 @@ Not yet, Working in Process...
   * Activate source at ABAP server
   * Run source (Not yet)
 * Install
+** Install within spacemacs
+   You should already have created a private layer, in this layer:
+   Add below code in ~packages.el~
 
+   #+BEGIN_SRC emacs-lisp
+     (defconst <your-layer-name>-packages
+       '(
+         (abap-mode
+          :location (recipe :fetcher github :repo "qianmarv/sap-abap-mode"))
+
+         (abap
+          :location (recipe :fetcher github :repo "qianmarv/ABAPInEmacs"))
+         ))
+
+     (defun qianmarv-sap/init-abap-mode ()
+       (use-package abap-mode
+         :mode ("\\.abap\\'" . abap-mode)
+         :init
+             ;;    (add-to-list 'auto-mode-alist '("\\.abap\\'" . abap-mode))
+         ))
+
+     (defun qianmarv-sap/init-abap ()
+       (use-package abap
+         :defer t
+         :after (request)
+         :init
+         (progn
+            (spacemacs/declare-prefix  "aa" "ABAP Development")
+            (spacemacs/set-leader-keys "aac" 'abap-create-project)
+            (spacemacs/set-leader-keys "aaa" 'abap-add-project)
+            (spacemacs/set-leader-keys "aar" 'abap-remove-project)
+            (spacemacs/set-leader-keys "aao" 'abap-open-project)
+            (spacemacs/set-leader-keys "aas" 'abap-add-server)
+            (spacemacs/set-leader-keys "aaf" 'abap-search-object)
+            (spacemacs/set-leader-keys "aal" 'abap-login)
+            (spacemacs/set-leader-keys-for-major-mode 'abap-mode "p" 'abap-open-project)
+            (spacemacs/set-leader-keys-for-major-mode 'abap-mode "f" 'abap-search-object)
+            (spacemacs/set-leader-keys-for-major-mode 'abap-mode "r" 'abap-retrieve-source)
+            (spacemacs/set-leader-keys-for-major-mode 'abap-mode "c" 'abap-check-source)
+            (spacemacs/set-leader-keys-for-major-mode 'abap-mode "r" 'abap-retrieve-source)
+            (spacemacs/set-leader-keys-for-major-mode 'abap-mode "s" 'abap-submit-source)
+            (spacemacs/set-leader-keys-for-major-mode 'abap-mode "a" 'abap-activate-source)
+            (spacemacs/set-leader-keys-for-major-mode 'abap-mode "=" 'abap-format-source)
+            (global-set-key (kbd "<C-return>") 'abap-code-completion)
+            )))
+   #+END_SRC
+** Install with package directly
+   You can download the packpage from here directly and initialize it within
+   your configurations.
 * How to Use
+** Setup project
+   The steps to setup ABAP project:
+   * Create project with =abap-create-project=
+     or if you already have a project, then with =abap-add-project=
+     If you want to remove a project from the list, do it with
+     =abap-remove-project=, be aware that it won't remove project files.
+     At any time, you can switch or open existing project with =abap-open-project=.
+   * Associate ABAP server with =abap-add-server=
+** Start to Develop
+   * You can do a one time login with =abap-login=, by default the encoded
+     credential will be persisted, so that you don't have to manually login everytime.
+   * Search ABAP development object (currently support ABAP report and ABAP
+     class only), and choose the one you want to retrieve source to local. 
+   * Once retrieve succeed, you're in the object directory, and you can see the
+     sources have been retrieved, now you can open any of the source code.
+   * Once the file with suffix ~.abap~ been opened, the major mode =ABAP-MODE=
+     will be switched, and you have all the functions with abap mode as in
+     below:
+     - abap-retrieve-source
+     - abap-format-source
+     - abap-check-source
+     - abap-submit-source
+     - abap-activate-source
+     - abap-code-completion
+     
+   You can also create git repository with the retrieve source code and
+   cooperate with other colleagues.
