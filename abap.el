@@ -80,7 +80,7 @@
 (defun abap-get-current-project ()
   "Get current project, prompt user choose project if none"
   (unless abaplib--current-project
-    (call-interactively 'abap-switch-project))
+    (call-interactively 'abap-open-project))
   abaplib--current-project)
 
 (defun abap-add-server ()
@@ -152,7 +152,7 @@
                          object-uri
                          source-name)))
 
-(defun abap-check-source ()
+(defun abap-check-source (&optional dont-show-error?)
   "Check source"
   (interactive)
   (let* ((source-name (file-name-nondirectory (buffer-file-name)))
@@ -162,8 +162,7 @@
          (source-code (buffer-substring-no-properties
                        (point-min)
                        (point-max))))
-    (abaplib-do-check source-version object-uri source-uri source-code)))
-
+    (abaplib-do-check source-version object-uri source-uri source-code dont-show-error?)))
 
 (defun abap-submit-source ()
   "Submit source"

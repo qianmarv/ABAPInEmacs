@@ -225,6 +225,11 @@
             extra-path)
         sub-path))))
 
+(defun abaplib-is-logged()
+  (let ((now (time-to-seconds (current-time))))
+    (and abaplib--login-last-time
+         (<= (- now abaplib--login-last-time) abap-login-timeout))))
+
 (defun abaplib--rest-api-call(uri success-callback &rest args)
   "Call service API."
   (let* ((url (abaplib-get-project-api-url uri))
@@ -234,20 +239,19 @@
          (params (cl-getf args :params)))
 
     ;; Verify whether need to login with token
-    (let ((now (time-to-seconds (current-time))))
-      (when (> (- now abaplib--login-last-time) abap-login-timeout)
-        (abaplib-auth-login-with-token abaplib--current-project
-                                       login-token
-                                       (abaplib-get-sap-client))))
+    (unless (abaplib-is-logged)
+      (abaplib-auth-login-with-token abaplib--current-project
+                                     login-token
+                                     (abaplib-get-sap-client)))
     ;; For method like POST, PUT, DELETE, required to get CSRF Token first
     ;; (message "headers:= %s" headers)
     (unless (string= type "GET")
-        ;; (setq headers (append headers (list login-token)))
-        (unless (assoc-string 'x-csrf-token headers)
-          (let ((csrf-token (abaplib-get-csrf-token)))
-            (setq headers
-                  (append headers
-                          (list (cons "x-csrf-token" csrf-token)))))))
+      ;; (setq headers (append headers (list login-token)))
+      (unless (assoc-string 'x-csrf-token headers)
+        (let ((csrf-token (abaplib-get-csrf-token)))
+          (setq headers
+                (append headers
+                        (list (cons "x-csrf-token" csrf-token)))))))
 
     ;; TODO Delete :headers from args as we have explicitly put headers here
     ;; (setq params (append params
@@ -319,7 +323,7 @@
     (unless project
       (error "Missing project"))
     (cdr (assoc-string key
-                     (cdr (abaplib-get-project-props project))))))
+                       (cdr (abaplib-get-project-props project))))))
 
 (defun abaplib-upsert-project(project-props)
   "When create or init project, add project information into workspace descriptor"
@@ -332,8 +336,8 @@
   (let* ((project-dir (replace-regexp-in-string "/$" "" project-dir))
          (project-props-curr (abaplib-get-project-props project-dir))
          (project-props-new (or project-props-curr
-                            (cons (intern project-dir)
-                                  (list (cons 'path project-dir))))))
+                                (cons (intern project-dir)
+                                      (list (cons 'path project-dir))))))
     ;; Warning if already exist
     (if project-props-curr
         (error "Project %s already exist!" project-dir)
@@ -488,14 +492,16 @@
 ;;==============================================================================
 ;; Module - Core Services - Syntax Check
 ;;==============================================================================
-(defun abaplib-do-check(version uri source-uri source-code)
+(defun abaplib-do-check(version uri source-uri source-code dont-show-error?)
   "Check syntax for program source
   TODO check whether source changed since last retrieved from server
        Not necessary to send the source code to server if no change."
   (message "Send syntax check request...")
   (let ((chkrun-uri (concat uri "/" source-uri))
         (chkrun-content (base64-encode-string source-code)))
-    (abaplib--check-post version uri chkrun-uri chkrun-content)))
+    (if dont-show-error?
+        (abaplib--check-post-sync version uri chkrun-uri chkrun-content)
+      (abaplib--check-post-async version uri chkrun-uri chkrun-content))))
 
 (defun abaplib--check-template (adtcore-uri chkrun-uri version chkrun-content)
   "Return xml of checkObjects"
@@ -517,7 +523,7 @@
    "</chkrun:checkObject>"
    "</chkrun:checkObjectList>"))
 
-(defun abaplib--check-post (version adtcore-uri chkrun-uri chkrun-content)
+(defun abaplib--check-post-async (version adtcore-uri chkrun-uri chkrun-content)
   (let ((check-uri "/sap/bc/adt/checkruns")
         (post-data (abaplib--check-template adtcore-uri chkrun-uri version chkrun-content)))
     (abaplib--rest-api-call
@@ -533,6 +539,38 @@
      :params '((reporters . abapCheckRun))
      :headers `(("Content-Type" . "application/vnd.sap.adt.checkobjects+xml")))))
 
+(defun abaplib--check-post-sync (version adtcore-uri chkrun-uri chkrun-content)
+  (let* ((check-uri "/sap/bc/adt/checkruns")
+         (post-data (abaplib--check-template adtcore-uri chkrun-uri version chkrun-content))
+         (response-data (abaplib--rest-api-call
+                         check-uri
+                         nil
+                         :parser 'abaplib-util-xml-parser
+                         :type "POST"
+                         :data post-data
+                         :params '((reporters . abapCheckRun))
+                         :headers `(("Content-Type" . "application/vnd.sap.adt.checkobjects+xml"))))
+         (check-report (xml-get-children response-data 'checkReport))
+         (message-list (xml-get-children (car check-report) 'checkMessageList))
+         (messages (xml-get-children (car message-list) 'checkMessage))
+         (parsed-errors))
+    (mapcar (lambda (message)
+              (let* ((uri (xml-get-attribute message 'uri))
+                     (level (case (intern (xml-get-attribute message 'type))
+                             ('W "warning")
+                             ('E "error")
+                             (t "success")))
+                     (text (xml-get-attribute message 'shortText))
+                     (position (split-string (progn
+                                 (string-match "#start=\\([0-9]+,[0-9]+\\)" uri)
+                                 (match-string 1 uri)) ","))
+                     (pos-line (string-to-number (car position)))
+                     (pos-column (string-to-number (car (cdr position)))))
+                `((line . ,pos-line)
+                  (column . ,pos-column)
+                  (level . ,level)
+                  (message . ,text))
+                )) messages)))
 
 (defun abaplib--check-render-type-text(type)
   (cond ((string= type "E") (propertize "Error"       'face '(bold (:foreground "red"))))
@@ -928,7 +966,7 @@
   (message "Request proposal completion from server...")
   (let* ((request-uri "/sap/bc/adt/abapsource/codecompletion/proposal")
          (params `((uri . ,(format "%s#start=%d,%d"
-                                       full-source-uri pos_row pos_col))
+                                   full-source-uri pos_row pos_col))
                    (signalCompleteness . true)))
          (completion-result (abaplib--rest-api-call request-uri
                                                     nil
