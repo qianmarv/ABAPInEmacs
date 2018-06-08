@@ -24,7 +24,7 @@
 
 ;;; Code:
 
-(require 'abaplib-core)
+(require 'abaplib)
 ;; (require 'abaplib-program)
 
 
@@ -35,6 +35,7 @@
 ;; Project
 ;;==============================================================================
 
+;;;###autoload
 (defun abap-create-project ()
   "Create new ABAP project"
   (interactive)
@@ -45,7 +46,8 @@
     (unless (file-directory-p parent-dir)
       (make-directory parent-dir))
     (abaplib-create-project project)
-    (message "Project %s created and added to workspace." project)))
+    (message "Project %s created and added to workspace." project)
+    (abap-open-project project)))
 
 (defun abap-add-project ()
   "Add ABAP project into workspace"
@@ -66,17 +68,19 @@
     (abaplib-remove-project project)
     (message "Project %s removed from workspace." project)))
 
-(defun abap-switch-project ()
-  "Switch ABAP project"
+;;;###autoload
+(defun abap-open-project (&optional project)
+  "Open ABAP project"
   (interactive)
-  (let ((project (completing-read "Select Project: " (abaplib-get-project-list))))
+  (let ((project (or project
+                     (completing-read "Select Project: " (abaplib-get-project-list)))))
     (abaplib-switch-project project)
     (dired project)))
 
 (defun abap-get-current-project ()
   "Get current project, prompt user choose project if none"
   (unless abaplib--current-project
-    (call-interactively 'abap-switch-project))
+    (call-interactively 'abap-open-project))
   abaplib--current-project)
 
 (defun abap-add-server ()
@@ -97,14 +101,15 @@
          (login-token (format "Basic %s" (base64-encode-string
                                           (concat username ":" password)))))
     (message "Connecting...")
-    (abaplib-auth-login-with-token project login-token client)))
+    (abaplib-auth-login-with-token project login-token client abap-save-login-credential)))
 
+;;;###autoload
 (defun abap-search-object ()
   "Retrieve ABAP objects"
   (interactive)
   (let* ((project (abap-get-current-project))
          (query-string (read-string "Enter Search String: "))
-         (search-result (abaplib-core-do-search query-string))
+         (search-result (abaplib-do-search query-string))
          ;; (completing-list (mapcar (lambda(object-node)
          ;;                            (let ((name (xml-get-attribute object-node 'name))
          ;;                                  (type (xml-get-attribute object-node 'type))
@@ -128,61 +133,116 @@
     (let* ((selected-item (completing-read "Maching Items: " completing-list))
            (selected-index (string-to-number (car (split-string selected-item " " t))))
            (selected-object (nth (- selected-index 1) search-result))
-           (object-node (xml-get-children selected-object 'objectReference)))
-      (abaplib-core-retrieve-object (xml-get-attribute selected-object 'name)
-                                    (xml-get-attribute selected-object 'type)
-                                    (xml-get-attribute selected-object 'uri)))))
+           (object-node (xml-get-children selected-object 'objectReference))
+           (object-path (abaplib-do-retrieve (xml-get-attribute selected-object 'name)
+                                             (xml-get-attribute selected-object 'type)
+                                             (xml-get-attribute selected-object 'uri))))
+      (dired object-path))))
 
 (defun abap-retrieve-source ()
   "Retrieve source"
   (interactive)
-  (let ((abap-object (or abap-object
-                         (abap-get-abap-object-from-file))))
-    ;; (abaplib-core-service-dispatch 'retrieve abap-object)
-    (abaplib-core-retrieve-object )
-    ))
+  (let ((source-name (file-name-nondirectory (buffer-file-name)))
+        (object-name (abaplib-get-property 'name))
+        (object-type (abaplib-get-property 'type))
+        (object-uri  (abaplib-get-property 'uri)))
+    ;; (abaplib-service-dispatch 'retrieve abap-object)
+    (abaplib-do-retrieve object-name
+                         object-type
+                         object-uri
+                         source-name)))
 
-(defun abap-check-source (&optional abap-object)
+(defun abap-check-source (&optional dont-show-error?)
   "Check source"
   (interactive)
-  (let ((abap-object (or abap-object
-                         (abap-get-abap-object-from-file))))
-    (abaplib-core-service-dispatch 'check abap-object)))
+  (let* ((source-name (file-name-nondirectory (buffer-file-name)))
+         (source-version (abaplib-get-property 'version source-name))
+         (object-uri (abaplib-get-property 'uri))
+         (source-uri (abaplib-get-property 'source-uri source-name))
+         (source-code (buffer-substring-no-properties
+                       (point-min)
+                       (point-max))))
+    (abaplib-do-check source-version object-uri source-uri source-code dont-show-error?)))
 
-
-(defun abap-submit-source (&optional abap-object)
+(defun abap-submit-source ()
   "Submit source"
   (interactive)
-  (let ((abap-object (or abap-object
-                         (abap-get-abap-object-from-file))))
-    (abaplib-core-service-dispatch 'submit abap-object)))
+  (let* ((source-name (file-name-nondirectory (buffer-file-name)))
+         (object-uri (abaplib-get-property 'uri))
+         (source-uri (abaplib-get-property 'source-uri source-name))
+         (package     (abaplib-get-property 'package))
+         (full-source-uri (concat object-uri "/" source-uri))
+         (tr-number)
+         (source-code (buffer-substring-no-properties
+                       (point-min)
+                       (point-max))))
+    (unless (string= package "$TMP")
+      (let* ((requests (abaplib-retrieve-trans-request full-source-uri))
+             (selected-req (completing-read "Change Request: " requests)))
+        (setq tr-number (string-trim (car (split-string selected-req "|"))))
+        (message (abaplib-post-cm-checkrun tr-number full-source-uri))))
+    (abaplib-do-submit full-source-uri source-code tr-number)))
 
-(defun abap-activate-source (&optional abap-object)
+(defun abap-activate-source ()
   "Activate source"
   (interactive)
-  (let ((abap-object (or abap-object
-                         (abap-get-abap-object-from-file))))
-    (abaplib-core-service-dispatch 'activate abap-object)))
+  (let ((object-name (abaplib-get-property 'name))
+        (object-uri (abaplib-get-property 'uri)))
+    (abaplib-do-activate object-name object-uri)))
 
-(defun abap-get-abap-object-from-file()
-  (let ((source-file-name (file-name-nondirectory (buffer-file-name)))
-        (property-file (expand-file-name abaplib-core-property-file)))
-    ;; Ensure propert file exist
-    (unless (file-exists-p property-file)
-      (error "Missing property file, please user `search' to retrieve again!"))
-    (let* ((properties (json-read-file property-file))
-           (object-name (alist-get 'name properties))
-           (object-type (alist-get 'type properties))
-           (object-uri  (alist-get 'uri properties))
-           (sources)))
-    ;; Ensure current file is a valid source file, which is:
-    ;; #1 Is in a file buffer
-    ;; #2 Contained in property file
+(defun abap-format-source ()
+  "Format source - `pretty print'"
+  (interactive)
+  (let* ((curr-buffer (current-buffer))
+         (object-name (abaplib-get-property 'name))
+         (source-code (buffer-substring-no-properties
+                       (point-min)
+                       (point-max)))
+         (formated-source (abaplib-do-format source-code)))
+    (unless (or (not formated-source)
+                (string= formated-source ""))
+      (progn
+        (set-buffer curr-buffer)
+        (erase-buffer)
+        (goto-char (point-min))
+        (insert formated-source)))))
 
-    (unless (find (intern object-type) abaplib-core--supported-type)
-      (error "Not a valid abap development file."))
-    `((name . ,object-name)
-      (type . ,object-type))))
+(defun abap-code-completion ()
+  "ABAP code completion"
+  (interactive)
+  (let* ((curr-buffer (current-buffer))
+         (source-name (file-name-nondirectory (buffer-file-name)))
+         (object-uri (abaplib-get-property 'uri))
+         (source-uri (abaplib-get-property 'source-uri source-name))
+         (full-source-uri (concat object-uri "/" source-uri))
+         (source-code (buffer-substring-no-properties
+                       (point-min)
+                       (point-max)))
+         (completion-result (abaplib-do-codecompletion-proposal full-source-uri
+                                                                (line-number-at-pos)
+                                                                (current-column)
+                                                                source-code)))
+    (unless completion-result
+      (error "No matches"))
+    (let* ((prompt-list (mapcar
+                         (lambda (completion)
+                           `(,(intern (abaplib-util-get-xml-value completion 'IDENTIFIER))
+                             . ,completion))
+                         completion-result))
+           (selected-key (completing-read "Matches: " prompt-list))
+           (completion (alist-get (intern selected-key) prompt-list))
+           (prefix-length (string-to-int (abaplib-util-get-xml-value completion
+                                                                     'PREFIXLENGTH)))
+           (completion-source (abaplib-do-codecompletion-insert full-source-uri
+                                                                (line-number-at-pos)
+                                                                (current-column)
+                                                                selected-key
+                                                                source-code)))
+      (unless (or (not completion-source)
+                  (string= completion-source ""))
+        (let ((source (substring completion-source prefix-length)))
+          (set-buffer curr-buffer)
+          (insert source))))))
 
 (provide 'abap)
 ;;; abap-in-emacs.el ends here
